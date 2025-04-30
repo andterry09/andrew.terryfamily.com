@@ -1,0 +1,1260 @@
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+  }
+  body {
+    background: #222;
+    position: relative;
+    overflow: hidden;
+    /* Add padding at the bottom to prevent overlap with the new bar */
+    padding-bottom: 70px; /* Adjust height based on bar size + padding */
+    box-sizing: border-box;
+  }
+  #terrain-grid {
+    position: absolute;
+    top: 0; left: 0;
+    display: grid;
+    pointer-events: none;
+    z-index: 0;
+    will-change: transform;
+  }
+  .cell {
+    width: 10px;
+    height: 10px;
+    box-sizing: border-box;
+    border: 1px solid rgba(0,0,0,0.05);
+    will-change: background;
+  }
+  .land {
+    background: #3cb371;
+  }
+  .water {
+    background: #3498db;
+  }
+  .sand {
+    background: #f4e285;
+  }
+  .rock {
+    background: #888 !important;
+  }
+  .walking-on {
+    /* This class still highlights the underlying cell */
+    outline: 2px solid #fff700;
+    outline-offset: -2px;
+    z-index: 2;
+  }
+  #charecter {
+    position: absolute;
+    width: 10px; /* Full cell size */
+    height: 10px; /* Full cell size */
+    background: red;
+    z-index: 3;
+    left: 50%;
+    top: 50%;
+    /* Adjusted transform to move 2px up */
+    transform: translate(-50%, calc(-50% - 35px));
+    border: 1px solid #900;
+    box-sizing: border-box;
+    pointer-events: none;
+    /* Add the yellow outline directly to the character */
+    outline: 2px solid #fff700;
+    outline-offset: -2px;
+    /* Ensure it's a positioning context for the child spin circle */
+    /* position: absolute already does this */
+  }
+  /* Zombies are the dark green enemies */
+  .zombie {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #014421;
+    z-index: 4;
+    border: 1px solid #002d14;
+    box-sizing: border-box;
+    pointer-events: none;
+    transition: left 0.2s linear, top 0.2s linear;
+  }
+  /* Skeletons are gray enemies */
+  .skeleton {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #bbb;
+    z-index: 4;
+    border: 1px solid #666;
+    box-sizing: border-box;
+    pointer-events: none;
+    transition: left 0.2s linear, top 0.2s linear;
+  }
+  /* drowends: light blue */
+  .water-enemy {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #aeefff;
+    z-index: 4;
+    border: 1px solid #4ad6e6;
+    box-sizing: border-box;
+    pointer-events: none;
+    transition: left 0.2s linear, top 0.2s linear;
+  }
+  /* arows (skeleton projectiles) */
+  .skeleton-bullet {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #7b4a19;
+    border-radius: 50%;
+    z-index: 10;
+    pointer-events: none;
+    border: 1px solid #4a2c0a;
+    box-sizing: border-box;
+    transition: left 0.08s linear, top 0.08s linear;
+  }
+  /* tridents (water-enemy projectiles) */
+  .water-bullet {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #00bfcf;
+    border-radius: 50%;
+    z-index: 10;
+    pointer-events: none;
+    border: 1px solid #008b99;
+    box-sizing: border-box;
+    transition: left 0.08s linear, top 0.08s linear;
+  }
+  #game-over-overlay {
+    position: fixed;
+    left: 0; top: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.8);
+    color: #fff700;
+    font-size: 3em;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    font-family: sans-serif;
+    letter-spacing: 0.1em;
+    text-shadow: 0 2px 8px #000;
+    pointer-events: all;
+    user-select: none;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #game-over-overlay.visible {
+    visibility: visible;
+    opacity: 1;
+  }
+  #restart-btn {
+    margin-top: 1em;
+    font-size: 0.5em;
+    padding: 0.5em 1.5em;
+    background: #fff700;
+    color: #222;
+    border: none;
+    border-radius: 0.3em;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: bold;
+    box-shadow: 0 2px 8px #0008;
+    transition: background 0.2s, color 0.2s;
+  }
+  #restart-btn:hover, #restart-btn:focus {
+    background: #ffe600;
+    color: #000;
+    outline: none;
+  }
+
+  /* --- Spin Attack --- */
+  @keyframes spin {
+    /* Transform is relative to the element's center */
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to { transform: translate(-50%, -50%) rotate(360deg); }
+  }
+  #spin-attack-circle {
+    position: absolute; /* Positioned relative to the character div */
+    /* Size covers roughly 3 cells radius (3 * 10px * 2 = 60px) */
+    width: 60px;
+    height: 60px;
+    border: 3px solid #aaa;
+    border-radius: 50%;
+    box-sizing: border-box;
+    /* Center it within the character div */
+    left: 50%;
+    top: 50%;
+    /* Use transform to center it precisely on the parent's center */
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    /* z-index relative to siblings within character, but character itself has z-index 3 */
+    /* Let's put it slightly behind the character visually if needed, or keep above */
+    z-index: -1; /* Behind the character's background */
+    display: none; /* Hidden by default */
+  }
+  #spin-attack-circle.spinning {
+    display: block;
+    /* Make it spin relatively fast */
+    /* The animation transform is applied relative to the element's position */
+    animation: spin 1s linear infinite;
+  }
+
+  /* --- Bottom Bar --- */
+  #bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: #1a1a1a; /* Dark background for the bar */
+    padding: 10px 0; /* Padding top/bottom */
+    display: flex;
+    justify-content: center; /* Center the boxes */
+    align-items: center;
+    z-index: 100; /* Ensure it's above the grid but below overlay */
+    box-shadow: 0 -2px 5px rgba(0,0,0,0.5); /* Optional shadow */
+    box-sizing: border-box;
+  }
+
+  .bar-box {
+    width: 40px; /* Example size */
+    height: 40px; /* Example size */
+    background-color: #444; /* Box background */
+    border: 1px solid #666; /* Box border */
+    margin: 0 5px; /* Spacing between boxes */
+    box-sizing: border-box;
+    /* Center content (like an image) */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden; /* Ensure image doesn't overflow */
+  }
+  /* Style for images inside the bar boxes */
+  .bar-box img {
+    display: block; /* Remove extra space below image */
+    max-width: 100%; /* Ensure image fits width */
+    max-height: 100%; /* Ensure image fits height */
+    object-fit: contain; /* Scale image down to fit, preserving aspect ratio */
+  }
+  /* Example: Style for a selected box */
+  .bar-box.selected {
+    border-color: #fff700;
+    box-shadow: 0 0 5px #fff700;
+  }
+
+</style>
+<div id="terrain-grid"></div>
+<div id="charecter">
+  <div id="spin-attack-circle"></div> <!-- Spin attack visual moved inside character -->
+</div>
+<!-- Zombies will be appended here -->
+<div id="enemies-container"></div>
+<!-- Skeleton projectiles will be appended here -->
+<div id="skeleton-bullets-container"></div>
+<!-- Water-enemy projectiles will be appended here -->
+<div id="water-bullets-container"></div>
+<div id="game-over-overlay">
+  <div>Game Over</div>
+  <button id="restart-btn" tabindex="0">Restart</button>
+</div>
+<!-- Bottom Bar HTML -->
+<div id="bottom-bar">
+  <div class="bar-box">
+    <img src="slash.png" alt="slash Ability"> <!-- Image is already in the first box -->
+  </div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+  <div class="bar-box"></div>
+</div>
+<script>
+  // Helper: 2D value noise for clustering
+  function valueNoise(x, y, scale, seed = 0) {
+    function hash(n) {
+      n = Math.sin(n + seed) * 10000;
+      return n - Math.floor(n);
+    }
+    let xf = x * scale, yf = y * scale;
+    let x0 = Math.floor(xf), y0 = Math.floor(yf);
+    let x1 = x0 + 1, y1 = y0 + 1;
+    let sx = xf - x0, sy = yf - y0;
+    let n00 = hash(x0 * 73856093 ^ y0 * 19349663);
+    let n10 = hash(x1 * 73856093 ^ y0 * 19349663);
+    let n01 = hash(x0 * 73856093 ^ y1 * 19349663);
+    let n11 = hash(x1 * 73856093 ^ y1 * 19349663);
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    let nx0 = lerp(n00, n10, sx);
+    let nx1 = lerp(n01, n11, sx);
+    return lerp(nx0, nx1, sy);
+  }
+
+  // Helper: 2D value noise for rocks, different seed
+  function rockNoise(x, y, scale, seed = 1234) {
+    function hash(n) {
+      n = Math.sin(n + seed) * 10000;
+      return n - Math.floor(n);
+    }
+    let xf = x * scale, yf = y * scale;
+    let x0 = Math.floor(xf), y0 = Math.floor(yf);
+    let x1 = x0 + 1, y1 = y0 + 1;
+    let sx = xf - x0, sy = yf - y0;
+    let n00 = hash(x0 * 73856093 ^ y0 * 19349663);
+    let n10 = hash(x1 * 73856093 ^ y0 * 19349663);
+    let n01 = hash(x0 * 73856093 ^ y1 * 19349663);
+    let n11 = hash(x1 * 73856093 ^ y1 * 19349663);
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    let nx0 = lerp(n00, n10, sx);
+    let nx1 = lerp(n01, n11, sx);
+    return lerp(nx0, nx1, sy);
+  }
+
+  // Infinite world settings
+  const grid = document.getElementById('terrain-grid');
+  const cellSize = 10;
+
+  // The visible area in cells
+  function getViewCols() {
+    // Adjust height calculation for the bottom bar
+    const availableHeight = window.innerHeight - 70; // Subtract bar height + padding
+    return Math.ceil(window.innerWidth / cellSize) + 4; // +4 for buffer
+  }
+  function getViewRows() {
+    // Adjust height calculation for the bottom bar
+    const availableHeight = window.innerHeight - 70; // Subtract bar height + padding
+    return Math.ceil(availableHeight / cellSize) + 4;
+  }
+
+  // --- Infinite rock clumps ---
+  // Instead of precomputing, generate clumps for each chunk
+  function getRockClumpsForChunk(chunkX, chunkY) {
+    // Deterministically generate clumps for this chunk
+    // Each chunk is 32x32 cells
+    const clumps = [];
+    // REDUCED: fewer clumps per chunk, and slightly smaller clumps
+    const numClumps = 7; // was 18, now 7 per chunk
+    const minR = 2, maxR = 4; // was 2-5, now 2-4
+    for (let i = 0; i < numClumps; i++) {
+      // Use chunkX, chunkY, i as seed
+      let seed = (chunkX * 92821 + chunkY * 123457 + i * 9876) % 1000000;
+      function rand() {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+      }
+      let cx = chunkX * 32 + Math.floor(rand() * 32);
+      let cy = chunkY * 32 + Math.floor(rand() * 32);
+      let r = minR + Math.floor(rand() * (maxR - minR + 1));
+      clumps.push({ cx, cy, r });
+    }
+    return clumps;
+  }
+
+  // --- Terrain cell type generator ---
+  // We'll cache generated cells for performance, but only for visible area
+  const cellCache = new Map();
+
+  function cellKey(x, y) {
+    return x + ',' + y;
+  }
+
+  function getTerrainType(x, y) {
+    // Check cache
+    const key = cellKey(x, y);
+    if (cellCache.has(key)) return cellCache.get(key);
+
+    // Water/land
+    let n = valueNoise(x, y, 0.08, 42);
+    // Infinite ponds: use world position, not world size
+    let pond1 = Math.hypot(x - 0.7 * 1000, y - 0.3 * 1000) < 10.4; // 1000 is arbitrary, just to keep ponds far apart
+    let pond2 = Math.hypot(x - 0.2 * 1000, y - 0.7 * 1000) < 6.5;
+    let isWater = (n < 0.28 || pond1 || pond2);
+
+    let type = isWater ? 'water' : 'land';
+    cellCache.set(key, type);
+    return type;
+  }
+
+  // --- Sand generator (around water) ---
+  function isWaterCell(x, y) {
+    return getTerrainType(x, y) === 'water';
+  }
+  function isSandCell(x, y) {
+    if (getTerrainType(x, y) !== 'land') return false;
+    // If any neighbor within 2 is water, it's sand
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        let nx = x + dx, ny = y + dy;
+        if (isWaterCell(nx, ny)) return true;
+      }
+    }
+    return false;
+  }
+
+  // --- Rock generator ---
+  function touchesWater(x, y) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        let nx = x + dx, ny = y + dy;
+        if (isWaterCell(nx, ny)) return true;
+      }
+    }
+    return false;
+  }
+  function touchesSand(x, y) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        let nx = x + dx, ny = y + dy;
+        if (isSandCell(nx, ny)) return true;
+      }
+    }
+    return false;
+  }
+  function isRockCell(x, y) {
+    if (getTerrainType(x, y) !== 'land') return false;
+    // Find which chunk this cell is in
+    const chunkX = Math.floor(x / 32);
+    const chunkY = Math.floor(y / 32);
+    const clumps = getRockClumpsForChunk(chunkX, chunkY);
+    let isRock = false;
+    for (let i = 0; i < clumps.length; i++) {
+      let clump = clumps[i];
+      let dist = Math.hypot(x - clump.cx, y - clump.cy);
+      // Make edge fuzz a bit smaller for less spread
+      let edgeFuzz = rockNoise(x, y, 0.4, 1000 + i * 100 + chunkX * 10000 + chunkY * 100000) * 2.0 - 1.0; // was 2.5-1.25
+      if (dist < clump.r + edgeFuzz * 1.5) { // was 2.2, now 1.5 for less spread
+        isRock = true;
+        break;
+      }
+    }
+    if (isRock && !touchesWater(x, y) && !touchesSand(x, y)) {
+      return true;
+    }
+    return false;
+  }
+
+  // --- DOM grid generation for visible area only ---
+  // We'll only create DOM cells for the visible area around the player
+  let prevCells = [];
+  let prevGridParams = {cols: 0, rows: 0, startX: 0, startY: 0};
+  let cellMatrix = [];
+  let needsFullRedraw = true;
+
+  // Track the last cell the character was walking on, for class removal
+  let lastWalkingCell = null;
+
+  // --- Enemy logic (zombies, skeletons, water enemies) ---
+  const enemiesContainer = document.getElementById('enemies-container');
+  // We'll keep a list of enemy objects: {x, y, el, moveTimer, type}
+  let enemies = [];
+
+  // --- Skeleton projectile logic ---
+  const skeletonBulletsContainer = document.getElementById('skeleton-bullets-container');
+  let skeletonBullets = []; // {x, y, dx, dy, el}
+
+  // --- Water-enemy projectile logic ---
+  const waterBulletsContainer = document.getElementById('water-bullets-container');
+  let waterBullets = []; // {x, y, dx, dy, el}
+
+  // Helper to check if a cell is walkable for enemies (not water or rock)
+  function isWalkable(x, y) {
+    return getTerrainType(x, y) !== 'water' && !isRockCell(x, y);
+  }
+
+  // Helper to check if a cell is walkable for water enemies (must be water)
+  function isWaterEnemyWalkable(x, y) {
+    return getTerrainType(x, y) === 'water' && !isEnemyAt(x, y);
+  }
+
+  // Helper to check if a cell is occupied by any enemy (optionally excluding one)
+  function isEnemyAt(x, y, excludeEnemy = null) {
+    for (let enemy of enemies) {
+      if (enemy === excludeEnemy) continue;
+      if (enemy.x === x && enemy.y === y) return true;
+    }
+    return false;
+  }
+
+  // Spawn a few enemies near the player
+  // type: "zombie" or "skeleton" or "water-enemy"
+  function spawnEnemies(num, type = "zombie") {
+    for (let i = 0; i < num; i++) {
+      let ex, ey, tries = 0;
+      if (type === "water-enemy") {
+        // Place water enemy randomly within 10 cells of player, but only in water and not on another enemy
+        do {
+          ex = charX + Math.floor(Math.random() * 21) - 10;
+          ey = charY + Math.floor(Math.random() * 21) - 10;
+          tries++;
+        } while (
+          (getTerrainType(ex, ey) !== 'water' || isEnemyAt(ex, ey) || (ex === charX && ey === charY))
+          && tries < 100
+        );
+      } else {
+        // Place enemy randomly within 10 cells of player, but not on water or on another enemy
+        do {
+          ex = charX + Math.floor(Math.random() * 21) - 10;
+          ey = charY + Math.floor(Math.random() * 21) - 10;
+          tries++;
+        } while (
+          (!isWalkable(ex, ey) || (ex === charX && ey === charY) || isEnemyAt(ex, ey))
+          && tries < 100
+        );
+      }
+      // Only spawn if a valid position was found
+      if (tries < 100) {
+        let enemyEl = document.createElement('div');
+        if (type === "zombie") {
+          enemyEl.className = 'zombie';
+        } else if (type === "skeleton") {
+          enemyEl.className = 'skeleton';
+        } else if (type === "water-enemy") {
+          enemyEl.className = 'water-enemy';
+        }
+        enemiesContainer.appendChild(enemyEl);
+        let enemyObj = {
+          x: ex,
+          y: ey,
+          el: enemyEl,
+          moveTimer: Math.random() * 30, // randomize initial move timer
+          type: type,
+          // SKELETON SHOOT SLOWER: shootTimer is now 60 + Math.random() * 90 (was 30 + Math.random() * 60)
+          shootTimer: 60 + Math.random() * 90 // skeletons shoot every 1-2.5s
+        };
+        // Water-enemy shoot timer: shoot every 1.5-3s
+        if (type === "water-enemy") {
+          enemyObj.shootTimer = 90 + Math.random() * 90;
+        }
+        enemies.push(enemyObj);
+      }
+    }
+  }
+
+  // --- GAME OVER LOGIC ---
+  let gameOver = false;
+  const gameOverOverlay = document.getElementById('game-over-overlay');
+  const restartBtn = document.getElementById('restart-btn');
+  function showGameOver() {
+    if (gameOver) return;
+    gameOver = true;
+    gameOverOverlay.classList.add('visible');
+    if (restartBtn) {
+      restartBtn.focus();
+    }
+    // Stop spin attack on game over
+    isSpinning = false;
+    spinCircle.style.display = 'none';
+    spinCircle.classList.remove('spinning');
+  }
+
+  function restartGame() {
+    gameOverOverlay.classList.remove('visible');
+    charX = 0;
+    charY = 0;
+    clearEnemies();
+    clearSkeletonBullets();
+    clearWaterBullets();
+    // Reset spin attack state
+    isSpinning = false;
+    spinTimer = 0;
+    spinCooldownTimer = 0;
+    spinCircle.style.display = 'none';
+    spinCircle.classList.remove('spinning');
+
+    spawnEnemies(3, "zombie");
+    needsFullRedraw = true;
+    cameraNeedsUpdate = true;
+    gameOver = false;
+    updateCamera();
+    animationLoop();
+  }
+
+  function clearEnemies() {
+    for (let enemy of enemies) {
+      if (enemy.el.parentNode) enemy.el.parentNode.removeChild(enemy.el);
+    }
+    enemies = [];
+  }
+
+  function clearSkeletonBullets() {
+    for (let bullet of skeletonBullets) {
+      if (bullet.el.parentNode) bullet.el.parentNode.removeChild(bullet.el);
+    }
+    skeletonBullets = [];
+  }
+
+  function clearWaterBullets() {
+    for (let bullet of waterBullets) {
+      if (bullet.el.parentNode) bullet.el.parentNode.removeChild(bullet.el);
+    }
+    waterBullets = [];
+  }
+
+  if (restartBtn) {
+    restartBtn.addEventListener('click', function() {
+      restartGame();
+    });
+    // Also allow pressing Enter/Space on the button
+    restartBtn.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        restartGame();
+      }
+    });
+  }
+
+  // --- ENEMY MOVEMENT LOGIC ---
+  // Each enemy moves every ~0.7-1.2 seconds, but now they follow the character
+  function updateEnemies() {
+    if (gameOver) return;
+    // Get visible area bounds
+    const viewCols = getViewCols();
+    const viewRows = getViewRows();
+    const startX = charX - Math.floor(viewCols / 2);
+    const startY = charY - Math.floor(viewRows / 2);
+    const endX = startX + viewCols;
+    const endY = startY + viewRows;
+
+    // Build a set of all enemy positions before movement
+    const occupiedPositions = new Set();
+    for (let enemy of enemies) {
+      occupiedPositions.add(enemy.x + ',' + enemy.y);
+    }
+    // --- Remove enemies that are >= 200 grid squares away from the character ---
+    // We'll use Euclidean distance (as Math.hypot)
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      let enemy = enemies[i];
+      let dist = Math.hypot(charX - enemy.x, charY - enemy.y);
+      if (dist >= 200) {
+        // Remove enemy from DOM
+        if (enemy.el && enemy.el.parentNode) {
+          enemy.el.parentNode.removeChild(enemy.el);
+        }
+        enemies.splice(i, 1);
+      }
+    }
+    // Now update remaining enemies
+    for (let i = enemies.length - 1; i >= 0; i--) { // Iterate backwards for safe removal
+      let enemy = enemies[i];
+      // Skip update if enemy was removed by spin attack this frame
+      if (!enemy || !enemy.el) continue;
+
+      enemy.moveTimer -= 1;
+      if (enemy.moveTimer <= 0) {
+        // Check if enemy is on screen
+        const isOnScreen =
+          enemy.x >= startX && enemy.x < endX &&
+          enemy.y >= startY && enemy.y < endY;
+
+        // Remove this enemy's current position from the set (so it can move off itself)
+        occupiedPositions.delete(enemy.x + ',' + enemy.y);
+
+        let moved = false;
+
+        if (isOnScreen) {
+          // Move enemy towards the character
+          let dx = charX - enemy.x;
+          let dy = charY - enemy.y;
+          let dirs = [];
+          // Prioritize axis with greatest distance
+          if (Math.abs(dx) > Math.abs(dy)) {
+            if (dx > 0) dirs.push([1, 0]);
+            else if (dx < 0) dirs.push([-1, 0]);
+            if (dy > 0) dirs.push([0, 1]);
+            else if (dy < 0) dirs.push([0, -1]);
+          } else {
+            if (dy > 0) dirs.push([0, 1]);
+            else if (dy < 0) dirs.push([0, -1]);
+            if (dx > 0) dirs.push([1, 0]);
+            else if (dx < 0) dirs.push([-1, 0]);
+          }
+          // Add the other two directions for fallback/randomness
+          if (!dirs.some(([a, b]) => a === 1 && b === 0)) dirs.push([1, 0]);
+          if (!dirs.some(([a, b]) => a === -1 && b === 0)) dirs.push([-1, 0]);
+          if (!dirs.some(([a, b]) => a === 0 && b === 1)) dirs.push([0, 1]);
+          if (!dirs.some(([a, b]) => a === 0 && b === -1)) dirs.push([0, -1]);
+          // Try directions in order, but randomize fallback order
+          let fallback = dirs.slice(2);
+          for (let k = fallback.length - 1; k > 0; k--) {
+            let j = Math.floor(Math.random() * (k + 1));
+            [fallback[k], fallback[j]] = [fallback[j], fallback[k]];
+          }
+          dirs = dirs.slice(0,2).concat(fallback);
+
+          // Water enemy movement: only move in water
+          if (enemy.type === "water-enemy") {
+            for (let [mx, my] of dirs) {
+              let nx = enemy.x + mx;
+              let ny = enemy.y + my;
+              // Only move if the target cell is water and not occupied by another enemy
+              if (
+                getTerrainType(nx, ny) === 'water' &&
+                !occupiedPositions.has(nx + ',' + ny)
+              ) {
+                enemy.x = nx;
+                enemy.y = ny;
+                occupiedPositions.add(nx + ',' + ny);
+                moved = true;
+                break;
+              }
+            }
+          } else {
+            // Normal enemy movement
+            for (let [mx, my] of dirs) {
+              let nx = enemy.x + mx;
+              let ny = enemy.y + my;
+              // Check if the target cell is walkable and not occupied by another enemy
+              if (
+                isWalkable(nx, ny) &&
+                !occupiedPositions.has(nx + ',' + ny)
+              ) {
+                enemy.x = nx;
+                enemy.y = ny;
+                occupiedPositions.add(nx + ',' + ny);
+                moved = true;
+                break;
+              }
+            }
+          }
+        } else {
+          // Enemy is off screen, do not move it (just re-add its current position)
+          moved = false;
+        }
+
+        // If didn't move, re-add its current position
+        if (!moved) {
+          occupiedPositions.add(enemy.x + ',' + enemy.y);
+        }
+        // Next move in 40-70 frames (~0.7-1.2s at 60fps)
+        enemy.moveTimer = 40 + Math.random() * 30;
+      }
+
+      // --- Skeleton shooting logic ---
+      if (enemy.type === "skeleton") {
+        // SKELETON SHOOT SLOWER: shootTimer is now 60 + Math.random() * 90 (was 30 + Math.random() * 60)
+        if (enemy.shootTimer === undefined) enemy.shootTimer = 60 + Math.random() * 90;
+        enemy.shootTimer -= 1;
+        // Only shoot if on screen
+        const isOnScreen =
+          enemy.x >= startX && enemy.x < endX &&
+          enemy.y >= startY && enemy.y < endY;
+        if (enemy.shootTimer <= 0 && isOnScreen) {
+          // Fire a brown dot (bullet) toward the character
+          // Only fire if character is not on same cell
+          if (!(enemy.x === charX && enemy.y === charY)) {
+            spawnSkeletonBullet(enemy.x, enemy.y, charX, charY);
+          }
+          // SKELETON SHOOT SLOWER: shootTimer is now 90 + Math.random() * 90 (was 60 + Math.random() * 60)
+          enemy.shootTimer = 90 + Math.random() * 90; // shoot every 1.5-2.999...s
+        }
+      }
+
+      // --- Water-enemy shooting logic ---
+      if (enemy.type === "water-enemy") {
+        if (enemy.shootTimer === undefined) enemy.shootTimer = 90 + Math.random() * 90;
+        enemy.shootTimer -= 1;
+        // Only shoot if on screen
+        const isOnScreen =
+          enemy.x >= startX && enemy.x < endX &&
+          enemy.y >= startY && enemy.y < endY;
+        if (enemy.shootTimer <= 0 && isOnScreen) {
+          // Fire a teal dot (bullet) toward the character
+          if (!(enemy.x === charX && enemy.y === charY)) {
+            spawnWaterBullet(enemy.x, enemy.y, charX, charY);
+          }
+          enemy.shootTimer = 90 + Math.random() * 90; // shoot every 1.5-3s
+        }
+      }
+    }
+  }
+
+  // --- SKELETON BULLET LOGIC ---
+  function spawnSkeletonBullet(fromX, fromY, toX, toY) {
+    // Calculate direction (dx, dy) as normalized vector
+    let dx = toX - fromX;
+    let dy = toY - fromY;
+    let dist = Math.hypot(dx, dy);
+    if (dist === 0) return; // don't shoot if on same cell
+    // Move in small steps, but always at least 1 cell per 2 frames
+    let step = 0.25; // bullet moves 0.25 cell per frame (fast)
+    let vx = dx / dist * step;
+    let vy = dy / dist * step;
+    let bulletEl = document.createElement('div');
+    bulletEl.className = 'skeleton-bullet';
+    skeletonBulletsContainer.appendChild(bulletEl);
+    skeletonBullets.push({
+      x: fromX + 0.5, // center of cell
+      y: fromY + 0.5,
+      dx: vx,
+      dy: vy,
+      el: bulletEl
+    });
+  }
+
+  // --- WATER-ENEMY BULLET LOGIC ---
+  function spawnWaterBullet(fromX, fromY, toX, toY) {
+    // Calculate direction (dx, dy) as normalized vector
+    let dx = toX - fromX;
+    let dy = toY - fromY;
+    let dist = Math.hypot(dx, dy);
+    if (dist === 0) return; // don't shoot if on same cell
+    let step = 0.22; // slightly slower than skeleton bullet
+    let vx = dx / dist * step;
+    let vy = dy / dist * step;
+    let bulletEl = document.createElement('div');
+    bulletEl.className = 'water-bullet';
+    waterBulletsContainer.appendChild(bulletEl);
+    waterBullets.push({
+      x: fromX + 0.5,
+      y: fromY + 0.5,
+      dx: vx,
+      dy: vy,
+      el: bulletEl
+    });
+  }
+
+  function updateSkeletonBullets() {
+    if (gameOver) return;
+    // Get visible area bounds and grid offset for rendering
+    const viewCols = getViewCols();
+    const viewRows = getViewRows();
+    const startX = charX - Math.floor(viewCols / 2);
+    const startY = charY - Math.floor(viewRows / 2);
+    const screenW = window.innerWidth;
+    // Adjust screen height for the bar
+    const screenH = window.innerHeight - 70;
+    const offsetX = Math.round(screenW / 2 - (Math.floor(viewCols / 2) + 0.5) * cellSize);
+    const offsetY = Math.round(screenH / 2 - (Math.floor(viewRows / 2) + 0.5) * cellSize);
+
+    for (let i = skeletonBullets.length - 1; i >= 0; i--) {
+      let bullet = skeletonBullets[i];
+      bullet.x += bullet.dx;
+      bullet.y += bullet.dy;
+
+      // Check for collision with character (if bullet is within 0.4 of charX/charY)
+      if (
+        Math.abs(bullet.x - (charX + 0.5)) < 0.4 &&
+        Math.abs(bullet.y - (charY + 0.5)) < 0.4
+      ) {
+        showGameOver();
+        // Remove bullet from DOM and array
+        if (bullet.el.parentNode) bullet.el.parentNode.removeChild(bullet.el);
+        skeletonBullets.splice(i, 1);
+        continue;
+      }
+
+      // Remove bullet if out of bounds (off screen or >300 cells from player)
+      let dist = Math.hypot(bullet.x - charX, bullet.y - charY);
+      if (
+        bullet.x < startX - 50 || bullet.x > startX + viewCols + 50 || // Check slightly beyond view
+        bullet.y < startY - 50 || bullet.y > startY + viewRows + 50 ||
+        dist > 300
+      ) {
+        if (bullet.el.parentNode) bullet.el.parentNode.removeChild(bullet.el);
+        skeletonBullets.splice(i, 1);
+        continue;
+      }
+
+      // Render bullet if on screen, else hide
+      let cx = bullet.x - startX;
+      let cy = bullet.y - startY;
+      if (
+        cx >= -1 && cx < viewCols + 1 && // Render slightly offscreen for smooth transition
+        cy >= -1 && cy < viewRows + 1
+      ) {
+        bullet.el.style.display = '';
+        bullet.el.style.left = (offsetX + cx * cellSize - 3) + 'px'; // -3 to center 6px bullet
+        bullet.el.style.top = (offsetY + cy * cellSize - 3) + 'px';
+      } else {
+        bullet.el.style.display = 'none';
+      }
+    }
+  }
+
+  function updateWaterBullets() {
+    if (gameOver) return;
+    // Get visible area bounds and grid offset for rendering
+    const viewCols = getViewCols();
+    const viewRows = getViewRows();
+    const startX = charX - Math.floor(viewCols / 2);
+    const startY = charY - Math.floor(viewRows / 2);
+    const screenW = window.innerWidth;
+    // Adjust screen height for the bar
+    const screenH = window.innerHeight - 70;
+    const offsetX = Math.round(screenW / 2 - (Math.floor(viewCols / 2) + 0.5) * cellSize);
+    const offsetY = Math.round(screenH / 2 - (Math.floor(viewRows / 2) + 0.5) * cellSize);
+
+    for (let i = waterBullets.length - 1; i >= 0; i--) {
+      let bullet = waterBullets[i];
+      bullet.x += bullet.dx;
+      bullet.y += bullet.dy;
+
+      // Check for collision with character (if bullet is within 0.4 of charX/charY)
+      if (
+        Math.abs(bullet.x - (charX + 0.5)) < 0.4 &&
+        Math.abs(bullet.y - (charY + 0.5)) < 0.4
+      ) {
+        showGameOver();
+        // Remove bullet from DOM and array
+        if (bullet.el.parentNode) bullet.el.parentNode.removeChild(bullet.el);
+        waterBullets.splice(i, 1);
+        continue;
+      }
+
+      // Remove bullet if out of bounds (off screen or >300 cells from player)
+      let dist = Math.hypot(bullet.x - charX, bullet.y - charY);
+      if (
+        bullet.x < startX - 50 || bullet.x > startX + viewCols + 50 || // Check slightly beyond view
+        bullet.y < startY - 50 || bullet.y > startY + viewRows + 50 ||
+        dist > 300
+      ) {
+        if (bullet.el.parentNode) bullet.el.parentNode.removeChild(bullet.el);
+        waterBullets.splice(i, 1);
+        continue;
+      }
+
+      // Render bullet if on screen, else hide
+      let cx = bullet.x - startX;
+      let cy = bullet.y - startY;
+      if (
+        cx >= -1 && cx < viewCols + 1 && // Render slightly offscreen for smooth transition
+        cy >= -1 && cy < viewRows + 1
+      ) {
+        bullet.el.style.display = '';
+        bullet.el.style.left = (offsetX + cx * cellSize - 3) + 'px'; // -3 to center 6px bullet
+        bullet.el.style.top = (offsetY + cy * cellSize - 3) + 'px';
+      } else {
+        bullet.el.style.display = 'none';
+      }
+    }
+  }
+
+  // --- ENEMY RENDERING ---
+  // We'll position enemies absolutely, like the character, but relative to the grid's transform
+  function renderEnemies(centerX, centerY) {
+    const viewCols = getViewCols();
+    const viewRows = getViewRows();
+    const startX = centerX - Math.floor(viewCols / 2);
+    const startY = centerY - Math.floor(viewRows / 2);
+
+    // Get grid's current transform offset
+    const screenW = window.innerWidth;
+    // Adjust screen height for the bar
+    const screenH = window.innerHeight - 70;
+    const offsetX = Math.round(screenW / 2 - (Math.floor(viewCols / 2) + 0.5) * cellSize);
+    const offsetY = Math.round(screenH / 2 - (Math.floor(viewRows / 2) + 0.5) * cellSize);
+
+    for (let enemy of enemies) {
+      // Only show if in visible area
+      if (
+        enemy.x >= startX && enemy.x < startX + viewCols &&
+        enemy.y >= startY && enemy.y < startY + viewRows
+      ) {
+        enemy.el.style.display = '';
+        enemy.el.style.left = (offsetX + (enemy.x - startX) * cellSize) + 'px';
+        enemy.el.style.top = (offsetY + (enemy.y - startY) * cellSize) + 'px';
+      } else {
+        enemy.el.style.display = 'none';
+      }
+    }
+  }
+
+  function renderSkeletonBullets(centerX, centerY) {
+    // Rendering is handled in updateSkeletonBullets for performance
+    // This function is a placeholder if needed for future
+  }
+
+  function renderWaterBullets(centerX, centerY) {
+    // Rendering is handled in updateWaterBullets for performance
+    // This function is a placeholder if needed for future
+  }
+
+  // --- GRID RENDERING ---
+  function renderVisibleGrid(centerX, centerY) {
+    const viewCols = getViewCols();
+    const viewRows = getViewRows();
+    const startX = centerX - Math.floor(viewCols / 2);
+    const startY = centerY - Math.floor(viewRows / 2);
+
+    // Only do a full DOM rebuild if grid size or position changed a lot
+    if (
+      needsFullRedraw ||
+      prevGridParams.cols !== viewCols ||
+      prevGridParams.rows !== viewRows
+    ) {
+      // Remove previous cells
+      for (const cell of prevCells) {
+        cell.remove();
+      }
+      prevCells = [];
+      cellMatrix = [];
+      grid.style.gridTemplateColumns = `repeat(${viewCols}, ${cellSize}px)`;
+      grid.style.gridTemplateRows = `repeat(${viewRows}, ${cellSize}px)`;
+
+      for (let y = 0; y < viewRows; y++) {
+        let row = [];
+        for (let x = 0; x < viewCols; x++) {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          grid.appendChild(cell);
+          prevCells.push(cell);
+          row.push(cell);
+        }
+        cellMatrix.push(row);
+      }
+      needsFullRedraw = false;
+    }
+
+    // Update cell classes only (reuse DOM nodes)
+    for (let y = 0; y < viewRows; y++) {
+      for (let x = 0; x < viewCols; x++) {
+        const worldX = startX + x;
+        const worldY = startY + y;
+        const cell = cellMatrix[y][x];
+        // Remove all terrain classes
+        cell.classList.remove('water', 'land', 'sand', 'rock', 'walking-on');
+        if (getTerrainType(worldX, worldY) === 'water') {
+          cell.classList.add('water');
+        } else if (isRockCell(worldX, worldY)) {
+          cell.classList.add('land');
+          cell.classList.add('rock');
+        } else if (isSandCell(worldX, worldY)) {
+          cell.classList.add('sand');
+        } else {
+          cell.classList.add('land');
+        }
+      }
+    }
+
+    // Highlight the cell the character is walking on
+    // The character is always centered in the grid, so:
+    const charCellX = Math.floor(viewCols / 2);
+    const charCellY = Math.floor(viewRows / 2);
+
+    // Remove previous highlight
+    if (lastWalkingCell) {
+      lastWalkingCell.classList.remove('walking-on');
+    }
+    // Apply highlight to the current cell under the character
+    if (
+      cellMatrix[charCellY] &&
+      cellMatrix[charCellY][charCellX]
+    ) {
+      // Check if the cell exists before adding class
+      if (cellMatrix[charCellY][charCellX]) {
+        cellMatrix[charCellY][charCellX].classList.add('walking-on');
+        lastWalkingCell = cellMatrix[charCellY][charCellX];
+      } else {
+        lastWalkingCell = null; // Should not happen if grid logic is correct
+      }
+    } else {
+      lastWalkingCell = null;
+    }
+
+
+    // Position the grid so the character is always centered
+    const screenW = window.innerWidth;
+    // Adjust screen height for the bar
+    const screenH = window.innerHeight - 70;
+    const offsetX = Math.round(screenW / 2 - (Math.floor(viewCols / 2) + 0.5) * cellSize);
+    const offsetY = Math.round(screenH / 2 - (Math.floor(viewRows / 2) + 0.5) * cellSize);
+    grid.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+
+    prevGridParams = {cols: viewCols, rows: viewRows, startX, startY};
+
+    // Also update enemies' positions
+    renderEnemies(centerX, centerY);
+    // Also update skeleton bullets' positions (includes rendering)
+    updateSkeletonBullets();
+    // Also update water bullets' positions (includes rendering)
+    updateWaterBullets();
+  }
+
+  // --- Character logic ---
+  const charecter = document.getElementById('charecter');
+  // Start at (0,0) - Note: The character element is visually centered via CSS.
+  // These coordinates define the character's position in the infinite world grid.
+  // Changing these won't change the character's screen position, only the surrounding terrain.
+  let charX = 0;
+  let charY = 0;
+
+  // --- Spin Attack Logic ---
+  // Get the spin circle element (now inside the character div)
+  const spinCircle = document.getElementById('spin-attack-circle');
+  let isSpinning = false;
+  const spinDuration = 180; // 3 seconds at 60fps
+  let spinTimer = 0;
+  const spinCooldown = 300; // 5 seconds cooldown
+  let spinCooldownTimer = 0;
+  const spinRadius = 3; // Radius in cells (matches CSS size)
+
+  function updateSpinAttack() {
+    if (spinCooldownTimer > 0) {
+      spinCooldownTimer--;
+    }
+
+    if (isSpinning) {
+      spinTimer--;
+      if (spinTimer <= 0) {
+        // Spin finished
+        isSpinning = false;
+        spinCircle.style.display = 'none';
+        spinCircle.classList.remove('spinning');
+      } else {
+        // Check for enemy collisions within the spin radius
+        for (let i = enemies.length - 1; i >= 0; i--) {
+          let enemy = enemies[i];
+          // Calculate distance from character center to enemy center
+          // Add 0.5 to enemy coords for center-to-center distance
+          let dist = Math.hypot((enemy.x + 0.5) - (charX + 0.5), (enemy.y + 0.5) - (charY + 0.5));
+
+          // Check if enemy center is within spin radius
+          if (dist <= spinRadius) {
+            // Enemy hit! Remove it.
+            if (enemy.el.parentNode) {
+              enemy.el.parentNode.removeChild(enemy.el);
+            }
+            enemies.splice(i, 1);
+            // Optional: Add score, sound effect, visual effect etc.
+          }
+        }
+      }
+    }
+  }
+
+  // Animation frame scheduling for smoothness
+  let cameraNeedsUpdate = true;
+  function updateCamera() {
+    cameraNeedsUpdate = true;
+  }
+
+  // --- ENEMY COLLISION CHECK ---
+  function checkEnemyCollision() {
+    if (gameOver || isSpinning) return; // Don't die if spin attack is active
+    for (let enemy of enemies) {
+      if (enemy.x === charX && enemy.y === charY) {
+        showGameOver();
+        break;
+      }
+    }
+    // Bullet collision is handled in their respective update functions
+  }
+
+  // --- MAIN ANIMATION LOOP ---
+  function animationLoop() {
+    if (!gameOver) {
+      updateEnemies();
+      updateSpinAttack(); // Update spin state and check collisions
+      checkEnemyCollision(); // Check player collision *after* spin check
+      // Bullet updates (which include rendering and collision checks) are called within renderVisibleGrid or below
+    }
+
+    if (cameraNeedsUpdate) {
+      renderVisibleGrid(charX, charY); // This now calls bullet updates too
+      cameraNeedsUpdate = false;
+    } else {
+      // Still update enemy positions even if camera doesn't move
+      renderEnemies(charX, charY);
+      // Bullets need updating/rendering even if grid doesn't change
+      updateSkeletonBullets();
+      updateWaterBullets();
+    }
+
+    if (!gameOver) {
+      requestAnimationFrame(animationLoop);
+    }
+  }
+
+  // Initial render
+  updateCamera();
+  animationLoop();
+
+  // Spawn 3 zombies at start
+  spawnEnemies(3, "zombie");
+
+  // --- INPUT HANDLING ---
+  window.addEventListener('keydown', function(e) {
+    if (gameOver) return;
+
+    // --- Spin Attack Activation ---
+    if (e.key === ' ' || e.code === 'Space') {
+      if (!isSpinning && spinCooldownTimer <= 0) {
+        isSpinning = true;
+        spinTimer = spinDuration;
+        spinCooldownTimer = spinCooldown;
+        spinCircle.style.display = 'block';
+        spinCircle.classList.add('spinning');
+        e.preventDefault(); // Prevent spacebar from scrolling page
+      }
+      return; // Don't process movement if space was pressed
+    }
+
+    // --- Movement ---
+    let moved = false;
+    let nextX = charX;
+    let nextY = charY;
+    if (e.key === "ArrowLeft") {
+      nextX = charX - 1;
+      nextY = charY;
+    } else if (e.key === "ArrowRight") {
+      nextX = charX + 1;
+      nextY = charY;
+    } else if (e.key === "ArrowUp") {
+      nextX = charX;
+      nextY = charY - 1;
+    } else if (e.key === "ArrowDown") {
+      nextX = charX;
+      nextY = charY + 1;
+    }
+
+    // Only move if not water or rock
+    if (
+      (nextX !== charX || nextY !== charY) &&
+      getTerrainType(nextX, nextY) !== 'water' &&
+      !isRockCell(nextX, nextY) // Prevent moving onto rocks
+    ) {
+      charX = nextX;
+      charY = nextY;
+      moved = true;
+    }
+
+    if (moved) {
+      // 2% chance to spawn a zombie on every move
+      if (Math.random() < 0.02) {
+        spawnEnemies(1, "zombie");
+      }
+      // 0.55% chance to spawn a skeleton on every move
+      if (Math.random() < 0.0055) {
+        spawnEnemies(1, "skeleton");
+      }
+      // 0.6% chance to spawn a water enemy on every move
+      if (Math.random() < 0.006) {
+        spawnEnemies(1, "water-enemy");
+      }
+      updateCamera();
+      checkEnemyCollision(); // Check collision immediately after moving
+      e.preventDefault(); // Prevent arrow keys from scrolling page
+    }
+  });
+
+  // Optional: update camera on resize
+  window.addEventListener('resize', function() {
+    needsFullRedraw = true;
+    updateCamera();
+  });
+
+  // Optional: allow restart on game over by pressing R
+  window.addEventListener('keydown', function(e) {
+    if (gameOver && (e.key === 'r' || e.key === 'R')) {
+      restartGame();
+    }
+  });
+</script>

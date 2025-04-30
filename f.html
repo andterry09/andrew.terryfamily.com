@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Changed title to reflect added Z-axis movement -->
+    <title>Simple 3D Platformer with Levels</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column; /* Stack game and messages */
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+            font-family: sans-serif;
+        }
+
+        #game-area {
+            position: relative; /* Establishes a positioning context for the world */
+            width: 600px;      /* Viewport width */
+            height: 400px;     /* Viewport height */
+            border: 1px solid #333;
+            background-color: #add8e6; /* Light blue background */
+            overflow: hidden; /* Crucial for scrolling effect */
+            margin-bottom: 10px; /* Space for messages */
+            /* --- Core 3D setting --- */
+            perspective: 800px; /* Creates a 3D space */
+        }
+
+        #world-container {
+            position: absolute; /* Allows moving the world */
+            left: 0;
+            top: 0;
+            /* Width will be set dynamically based on world content */
+            height: 100%; /* Matches game area height */
+            /* background-color: #eee; /* Optional: visualize world area */
+            transition: transform 0.1s linear, width 0s; /* Smooth scrolling, instant width change */
+            /* --- Core 3D setting --- */
+            transform-style: preserve-3d; /* Allows children to be positioned in 3D */
+        }
+
+        /* Base styles for world objects - position set by JS */
+        .world-object {
+             position: absolute;
+             box-sizing: border-box;
+             /* transform-origin: center center; */ /* Helps with potential rotations if added later */
+        }
+
+        .platform {
+            /* Extends world-object */
+            background-color: #8B4513; /* Brown color */
+            border: 1px solid #5a2d0c;
+            /* Z-transform set by JS based on level data */
+        }
+
+        .goal-platform {
+            /* Extends world-object */
+            background-color: #00cc00; /* Green color */
+            border: 1px solid #008800;
+            /* Z-transform set by JS based on level data */
+        }
+
+        .wall {
+            /* Extends world-object */
+            background-color: #888; /* Gray color */
+            border: 1px solid #555;
+            /* Z-transform set by JS based on level data */
+        }
+
+        #player {
+            /* Extends world-object */
+            width: 20px;
+            height: 20px;
+            background-color: #ff0000; /* Red color */
+            /* Initial position and Z-transform set by JS */
+            /* transform: translateZ(10px); /* Base Z set dynamically */
+        }
+
+        .enemy {
+            /* Extends world-object */
+            width: 15px; /* Base width - SMALLER */
+            height: 15px; /* Height - SMALLER */
+            background-color: #ff8c00; /* Orange color - applied before clipping */
+            clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+            transition: left 0.05s linear; /* Smooth enemy X movement */
+            /* Z-transform set by JS based on level data */
+            /* transform: translateZ(10px); /* Base Z set dynamically */
+        }
+
+        /* Optional: Debug display */
+        #debug-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px;
+            font-size: 12px;
+            z-index: 10; /* Ensure debug is visible */
+            transform: translateZ(20px); /* Keep debug info visually on top */
+        }
+
+        #message-area {
+            font-size: 1.2em;
+            color: #333;
+            height: 30px; /* Reserve space */
+            text-align: center;
+        }
+        /* Dash cooldown indicator */
+        #dash-cooldown-indicator {
+            width: 120px;
+            height: 10px;
+            background: #ddd;
+            border: 1px solid #aaa;
+            margin: 0 auto 8px auto;
+            border-radius: 5px;
+            overflow: hidden;
+            position: relative;
+        }
+        #dash-cooldown-bar {
+            height: 100%;
+            background: #4caf50;
+            width: 100%;
+            transition: width 0.1s linear;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Note: This implementation adds Z-axis movement and visual depth using CSS transforms. -->
+<!-- The core game logic (gravity, collision) remains primarily 2D for simplicity. -->
+<!-- True 3D physics and collision would require a more complex engine. -->
+
+<div id="game-area">
+    <div id="world-container">
+        <!-- Platforms, Walls, Enemies, and Goal will be added here by JavaScript -->
+        <div id="player" class="world-object"></div> <!-- Added base class -->
+    </div>
+    <!-- Optional: Debug display element -->
+    <!-- <div id="debug-info">Debug Info</div> -->
+</div>
+<div id="dash-cooldown-indicator" style="display:none;">
+    <div id="dash-cooldown-bar"></div>
+</div>
+<div id="message-area">Level 1</div> <!-- Message Area -->
+
+<script>
+    // NOTE: Z-axis movement and visual depth added. Core collision remains 2D.
+
+    const player = document.getElementById('player');
+    const gameArea = document.getElementById('game-area');
+    const worldContainer = document.getElementById('world-container');
+    const messageArea = document.getElementById('message-area');
+    const dashCooldownIndicator = document.getElementById('dash-cooldown-indicator');
+    const dashCooldownBar = document.getElementById('dash-cooldown-bar');
+    // const debugInfo = document.getElementById('debug-info'); // Optional debug
+
+    // --- World and Viewport ---
+    const viewportWidth = gameArea.offsetWidth;
+    const viewportHeight = gameArea.offsetHeight;
+    let worldWidth = 1800; // Default, will be overridden by level data
+    const worldMinZ = -50; // How far back the player can go
+    const worldMaxZ = 50;  // How far forward the player can go
+
+    // --- Level Data (Added Z coordinate) ---
+    // Default Z values: Platforms=0, Walls=-10, Enemies=5, Goal=5
+    const levels = [
+        // ... (unchanged, omitted for brevity)
+        // Level data is unchanged
+        {
+            worldWidth: 1800,
+            startPos: { x: 150, y: 330, z: 10 }, // Added Z
+            platforms: [
+                { x: 100, y: 350, z: 0, width: 200, height: 20 },
+                { x: 400, y: 300, z: 0, width: 150, height: 20 },
+                { x: 600, y: 250, z: 0, width: 100, height: 20 },
+                { x: 750, y: 350, z: 0, width: 180, height: 20 },
+                { x: 950, y: 300, z: 0, width: 150, height: 20 },
+                { x: 1200, y: 250, z: 0, width: 100, height: 20 },
+                { x: 1400, y: 300, z: 0, width: 150, height: 20 },
+                { x: 1650, y: 250, z: 5, width: 80, height: 20, type: 'goal' } // Goal slightly forward
+            ],
+            walls: [ // Walls slightly behind
+                { x: 350, y: 150, z: -10, width: 20, height: 150 },
+                { x: 700, y: 100, z: -10, width: 20, height: 150 },
+                { x: 1100, y: 150, z: -10, width: 20, height: 150 }
+            ],
+            enemies: [ // Enemies slightly forward
+                { x: 420, y: 285, z: 5, width: 15, height: 15, moveRange: 100, speed: 0.5 },
+                { x: 780, y: 335, z: 5, width: 15, height: 15, moveRange: 120, speed: 0.75 },
+                { x: 1430, y: 285, z: 5, width: 15, height: 15, moveRange: 100, speed: 0.6 },
+            ]
+        },
+        {
+            worldWidth: 2000,
+            startPos: { x: 80, y: 330, z: 10 },
+            platforms: [
+                { x: 50, y: 350, z: 0, width: 150, height: 20 },
+                { x: 300, y: 300, z: 0, width: 100, height: 20 },
+                { x: 500, y: 350, z: 0, width: 120, height: 20 },
+                { x: 700, y: 280, z: 0, width: 150, height: 20 },
+                { x: 950, y: 220, z: 0, width: 100, height: 20 },
+                { x: 1100, y: 350, z: 0, width: 50, height: 20 },
+                { x: 1200, y: 320, z: 0, width: 50, height: 20 },
+                { x: 1300, y: 290, z: 0, width: 50, height: 20 },
+                { x: 1500, y: 250, z: 0, width: 200, height: 20 },
+                { x: 1800, y: 200, z: 5, width: 100, height: 20, type: 'goal' }
+            ],
+            walls: [
+                { x: 450, y: 100, z: -10, width: 20, height: 200 },
+                { x: 900, y: 220, z: -10, width: 20, height: 130 },
+                { x: 1450, y: 50, z: -10, width: 20, height: 200 },
+            ],
+            enemies: [
+                { x: 720, y: 265, z: 5, width: 15, height: 15, moveRange: 100, speed: 0.8 },
+                { x: 1550, y: 235, z: 5, width: 15, height: 15, moveRange: 150, speed: 1.0 },
+            ]
+        },
+        {
+            worldWidth: 2200,
+            startPos: { x: 100, y: 100, z: 10 },
+            platforms: [
+                { x: 50, y: 150, z: 0, width: 150, height: 20 },
+                { x: 300, y: 200, z: 0, width: 100, height: 20 },
+                { x: 500, y: 250, z: 0, width: 150, height: 20 },
+                { x: 750, y: 300, z: 0, width: 50, height: 20 },
+                { x: 900, y: 350, z: 0, width: 200, height: 20 },
+                { x: 1200, y: 300, z: 0, width: 100, height: 20 },
+                { x: 1400, y: 250, z: 0, width: 150, height: 20 },
+                { x: 1650, y: 200, z: 0, width: 50, height: 20 },
+                { x: 1750, y: 150, z: 0, width: 50, height: 20 },
+                { x: 1900, y: 100, z: 0, width: 200, height: 20 },
+                { x: 2150, y: 100, z: 5, width: 80, height: 20, type: 'goal' }
+            ],
+            walls: [
+                { x: 450, y: 50, z: -10, width: 20, height: 150 },
+                { x: 1150, y: 150, z: -10, width: 20, height: 200 },
+                { x: 1850, y: 100, z: -10, width: 20, height: 250 }
+            ],
+            enemies: [
+                { x: 550, y: 235, z: 5, width: 15, height: 15, moveRange: 80, speed: 0.7 },
+                { x: 950, y: 335, z: 5, width: 15, height: 15, moveRange: 120, speed: 0.9 },
+                { x: 1450, y: 235, z: 5, width: 15, height: 15, moveRange: 80, speed: 0.8 },
+                { x: 1950, y: 85, z: 5, width: 15, height: 15, moveRange: 100, speed: 1.1 },
+            ]
+        },
+        {
+            worldWidth: 2000,
+            startPos: { x: 50, y: 350, z: 10 },
+            platforms: [
+                { x: 0, y: 380, z: 0, width: 150, height: 20 },
+                { x: 300, y: 300, z: 0, width: 20, height: 100 }, // Vertical platform treated as platform
+                { x: 450, y: 200, z: 0, width: 150, height: 20 },
+                { x: 700, y: 350, z: 0, width: 100, height: 20 },
+                { x: 900, y: 300, z: 0, width: 150, height: 20 },
+                { x: 1150, y: 250, z: 0, width: 20, height: 150 }, // Vertical platform
+                { x: 1300, y: 100, z: 0, width: 200, height: 20 },
+                { x: 1600, y: 150, z: 0, width: 50, height: 20 },
+                { x: 1750, y: 200, z: 0, width: 150, height: 20 },
+                { x: 1950, y: 180, z: 5, width: 80, height: 20, type: 'goal' }
+            ],
+            walls: [
+                { x: 250, y: 100, z: -10, width: 20, height: 200 },
+                { x: 650, y: 200, z: -10, width: 20, height: 150 },
+                { x: 1100, y: 0, z: -10, width: 20, height: 250 },
+                { x: 1550, y: 100, z: -10, width: 20, height: 280 }
+            ],
+            enemies: [
+                { x: 480, y: 185, z: 5, width: 15, height: 15, moveRange: 100, speed: 1.0 },
+                { x: 930, y: 285, z: 5, width: 15, height: 15, moveRange: 100, speed: 1.2 },
+                { x: 1350, y: 85, z: 5, width: 15, height: 15, moveRange: 150, speed: 1.5 },
+                { x: 1780, y: 185, z: 5, width: 15, height: 15, moveRange: 100, speed: 1.3 },
+            ]
+        }
+    ];
+
+    let currentLevelIndex = 0;
+
+    // --- Obstacle Storage (Collision data remains 2D) ---
+    let obstacles = []; // Combined list for collision (platforms, walls, enemies, goal)
+    let dynamicObstacles = []; // Separate list for things that move (enemies)
+
+    // --- Player Properties (Added Z dimension) ---
+    const playerWidth = player.offsetWidth;
+    const playerHeight = player.offsetHeight;
+    // Player X/Y/Z position
+    let playerX = 50;
+    let playerY = 50;
+    let playerZ = 10; // Added Z position
+    // Initial position placeholders
+    let initialPlayerX = 50;
+    let initialPlayerY = 50;
+    let initialPlayerZ = 10; // Added initial Z
+
+    // --- Movement and Physics Variables (Added Z dimension) ---
+    const horizontalSpeed = 4;
+    const depthSpeed = 2; // Speed for moving forward/backward (Z-axis)
+    const gravity = 0.5;
+    const jumpStrength = 10;
+    const wallJumpStrength = 10;
+    const wallJumpHorizontalBoost = 6;
+    const wallSlideSpeed = 1.5;
+
+    // Dash variables
+    const dashSpeed = 14; // How fast the dash is
+    const dashDuration = 120; // ms, how long the dash lasts
+    const dashCooldown = 900; // ms, how long before you can dash again
+    let dashAvailable = true;
+    let dashActive = false;
+    let dashDirection = 0; // -1 for left, 1 for right
+    let dashTimer = 0;
+    let dashCooldownTimer = 0;
+
+    // Velocities
+    let velocityX = 0;
+    let velocityY = 0;
+    let velocityZ = 0; // Added Z velocity
+
+    // State flags
+    let isOnGround = false;
+    let isTouchingWallLeft = false;
+    let isTouchingWallRight = false;
+    let canWallJump = false;
+
+    // Input flags
+    let moveLeft = false;
+    let moveRight = false;
+    let moveForward = false; // Added Z movement flag
+    let moveBackward = false; // Added Z movement flag
+
+    // --- Camera/Scrolling Variables (Still only X-axis scrolling) ---
+    let cameraX = 0;
+    const scrollMargin = viewportWidth / 3;
+
+    // --- Game State ---
+    let gameRunning = true; // Flag to stop game loop on win
+
+    // --- Input Handling (Added Z-axis keys and dash) ---
+    document.addEventListener('keydown', (event) => {
+        if (!gameRunning) return;
+        switch (event.key) {
+            case 'ArrowLeft':
+            case 'a':
+                moveLeft = true;
+                break;
+            case 'ArrowRight':
+            case 'd':
+                moveRight = true;
+                break;
+            case 'ArrowUp': // Use ArrowUp for jump
+                if (isOnGround) {
+                    velocityY = -jumpStrength;
+                    isOnGround = false;
+                } else if (canWallJump) {
+                    velocityY = -wallJumpStrength;
+                    velocityX = isTouchingWallRight ? -wallJumpHorizontalBoost : wallJumpHorizontalBoost;
+                    isTouchingWallLeft = false;
+                    isTouchingWallRight = false;
+                    canWallJump = false;
+                }
+                break;
+            case ' ':
+                // DASH: Only trigger dash if not holding down (no repeat), dash is available, and not already dashing
+                if (!event.repeat && dashAvailable && !dashActive) {
+                    // Determine dash direction: prefer left/right input, else last direction, else right
+                    if (moveLeft && !moveRight) {
+                        dashDirection = -1;
+                    } else if (moveRight && !moveLeft) {
+                        dashDirection = 1;
+                    } else {
+                        // If neither pressed, dash in last direction or right by default
+                        dashDirection = (velocityX < 0) ? -1 : 1;
+                    }
+                    dashActive = true;
+                    dashAvailable = false;
+                    dashTimer = dashDuration;
+                    dashCooldownTimer = dashCooldown;
+                    // Optionally, play a dash effect here
+                    dashCooldownIndicator.style.display = "block";
+                } else {
+                    // If not dashing, treat as jump (legacy behavior)
+                    if (isOnGround && !dashActive) {
+                        velocityY = -jumpStrength;
+                        isOnGround = false;
+                    } else if (canWallJump && !dashActive) {
+                        velocityY = -wallJumpStrength;
+                        velocityX = isTouchingWallRight ? -wallJumpHorizontalBoost : wallJumpHorizontalBoost;
+                        isTouchingWallLeft = false;
+                        isTouchingWallRight = false;
+                        canWallJump = false;
+                    }
+                }
+                break;
+            case 'ArrowDown': // Use ArrowDown OR S for backward
+            case 's':
+                moveBackward = true;
+                break;
+            case 'w': // Use W for forward (distinct from jump)
+                 moveForward = true;
+                 break;
+        }
+    });
+
+    document.addEventListener('keyup', (event) => {
+        // No keyup check needed if game isn't running
+        switch (event.key) {
+            case 'ArrowLeft':
+            case 'a':
+                moveLeft = false;
+                break;
+            case 'ArrowRight':
+            case 'd':
+                moveRight = false;
+                break;
+            case 'ArrowDown':
+            case 's':
+                moveBackward = false;
+                break;
+            case 'w':
+                 moveForward = false;
+                 break;
+        }
+    });
+
+    // --- Load Level Function (Handles Z positioning) ---
+    function loadLevel(levelIndex) {
+        if (levelIndex >= levels.length) {
+            console.log("You Win!");
+            messageArea.textContent = "You Win!";
+            gameRunning = false;
+            worldContainer.innerHTML = '';
+            player.style.display = 'none';
+            dashCooldownIndicator.style.display = "none";
+            return;
+        }
+
+        gameRunning = true;
+        player.style.display = 'block';
+        currentLevelIndex = levelIndex;
+        const levelData = levels[currentLevelIndex];
+        messageArea.textContent = `Level ${currentLevelIndex + 1}`;
+
+        worldContainer.innerHTML = '';
+        worldContainer.appendChild(player);
+        obstacles = [];
+        dynamicObstacles = [];
+
+        worldWidth = levelData.worldWidth;
+        worldContainer.style.width = worldWidth + 'px';
+
+        // Helper to create and position elements
+        const createElement = (data, className, type) => {
+            const el = document.createElement('div');
+            el.className = `world-object ${className}`; // Add base class
+            el.style.left = data.x + 'px';
+            el.style.top = data.y + 'px';
+            el.style.width = data.width + 'px';
+            el.style.height = data.height + 'px';
+            // Set visual depth using translateZ
+            el.style.transform = `translateZ(${data.z || 0}px)`;
+            worldContainer.appendChild(el);
+            obstacles.push({
+                element: el, type: type,
+                // Collision data remains 2D
+                x: data.x, y: data.y, width: data.width, height: data.height,
+                top: data.y, left: data.x, right: data.x + data.width, bottom: data.y + data.height,
+                // Store Z for potential future use (e.g., Z-based collision filtering)
+                z: data.z || 0
+            });
+            return el; // Return element if needed (e.g., for enemies)
+        };
+
+        // --- Create Platform Elements ---
+        levelData.platforms.forEach(pData => {
+            const isGoal = pData.type === 'goal';
+            createElement(pData, isGoal ? 'goal-platform' : 'platform', isGoal ? 'goal' : 'platform');
+        });
+
+        // --- Create Wall Elements ---
+        levelData.walls.forEach(wData => {
+            createElement(wData, 'wall', 'wall');
+        });
+
+        // --- Create Enemy Elements ---
+        levelData.enemies.forEach(eData => {
+            const enemyEl = createElement(eData, 'enemy', 'enemy');
+            // Enemy-specific data for movement and collision object
+            const enemyObj = obstacles[obstacles.length - 1]; // Get the object just pushed
+            enemyObj.startX = eData.x;
+            enemyObj.moveRange = eData.moveRange;
+            enemyObj.speed = eData.speed;
+            enemyObj.direction = 1;
+            dynamicObstacles.push(enemyObj); // Add to dynamic list
+        });
+
+        // Reset Player State for the new level (including Z)
+        initialPlayerX = levelData.startPos.x;
+        initialPlayerY = levelData.startPos.y;
+        initialPlayerZ = levelData.startPos.z; // Use Z from level data
+        playerX = initialPlayerX;
+        playerY = initialPlayerY;
+        playerZ = initialPlayerZ;
+        velocityX = 0;
+        velocityY = 0;
+        velocityZ = 0; // Reset Z velocity
+        isOnGround = false;
+        isTouchingWallLeft = false;
+        isTouchingWallRight = false;
+        canWallJump = false;
+        moveLeft = false;
+        moveRight = false;
+        moveForward = false; // Reset Z input flags
+        moveBackward = false;
+        cameraX = 0;
+
+        // Dash state reset
+        dashAvailable = true;
+        dashActive = false;
+        dashDirection = 0;
+        dashTimer = 0;
+        dashCooldownTimer = 0;
+        dashCooldownIndicator.style.display = "none";
+        dashCooldownBar.style.width = "100%";
+
+        // Update player visuals immediately (X, Y position and Z transform)
+        player.style.left = playerX + 'px';
+        player.style.top = playerY + 'px';
+        player.style.transform = `translateZ(${playerZ}px)`;
+        // Update world scroll position (only X)
+        worldContainer.style.transform = `translateX(-${cameraX}px)`;
+    }
+
+
+    // --- Restart Current Level Function (Unchanged) ---
+    function restartLevel() {
+        console.log("Player hit enemy or fell! Restarting level...");
+        loadLevel(currentLevelIndex);
+    }
+
+    // --- Enemy Movement Logic (Unchanged - only updates X) ---
+    function updateEnemies() {
+        dynamicObstacles.forEach(enemy => {
+            if (enemy.speed === 0) return;
+
+            let nextEnemyX = enemy.x + enemy.speed * enemy.direction;
+
+            if (enemy.direction > 0 && nextEnemyX > enemy.startX + enemy.moveRange) {
+                enemy.direction = -1;
+                nextEnemyX = enemy.startX + enemy.moveRange;
+            } else if (enemy.direction < 0 && nextEnemyX < enemy.startX) {
+                enemy.direction = 1;
+                nextEnemyX = enemy.startX;
+            }
+
+            enemy.x = nextEnemyX;
+            enemy.left = enemy.x;
+            enemy.right = enemy.x + enemy.width;
+
+            // Update visual position (only X - Z remains constant from loadLevel)
+            enemy.element.style.left = enemy.x + 'px';
+        });
+    }
+
+
+    // --- Game Loop (Handles Z movement, 2D Collision, and Dash) ---
+    function gameLoop() {
+        if (!gameRunning) {
+             requestAnimationFrame(gameLoop);
+             return;
+        }
+
+        let levelTransitionTriggered = false;
+
+        // 0. Update Enemy Positions (2D movement)
+        updateEnemies();
+
+        // --- DASH LOGIC ---
+        // Dash timer and cooldown update
+        if (dashActive) {
+            dashTimer -= 16.67; // Approximate ms per frame at 60fps
+            if (dashTimer <= 0) {
+                dashActive = false;
+                // After dash, set velocityX to 0 to prevent sliding
+                velocityX = 0;
+            }
+        }
+        if (!dashAvailable) {
+            dashCooldownTimer -= 16.67;
+            if (dashCooldownTimer <= 0) {
+                dashAvailable = true;
+                dashCooldownIndicator.style.display = "none";
+                dashCooldownBar.style.width = "100%";
+            } else {
+                // Show cooldown bar
+                dashCooldownIndicator.style.display = "block";
+                let percent = Math.max(0, Math.min(1, dashCooldownTimer / dashCooldown));
+                dashCooldownBar.style.width = (percent * 100) + "%";
+            }
+        }
+
+        // 1. Apply Gravity (Y-axis only)
+        velocityY += gravity;
+
+        // 2. Handle Horizontal (X) Input & Apply Velocity/Friction
+        if (dashActive) {
+            // During dash, override velocityX
+            velocityX = dashSpeed * dashDirection;
+        } else {
+            if (!moveLeft && !moveRight && isOnGround) {
+                velocityX = 0;
+            } else if (!moveLeft && !moveRight && !isOnGround && !isTouchingWallLeft && !isTouchingWallRight) {
+                velocityX *= 0.9; // Air resistance X
+            } else {
+                if (moveLeft) velocityX = -horizontalSpeed;
+                if (moveRight) velocityX = horizontalSpeed;
+            }
+            if (Math.abs(velocityX) < 0.1) velocityX = 0;
+        }
+
+        // 2b. Handle Depth (Z) Input & Apply Velocity/Friction
+        if (!moveForward && !moveBackward) {
+            velocityZ *= 0.85; // Z-axis damping
+        } else {
+            if (moveForward) velocityZ = depthSpeed;
+            if (moveBackward) velocityZ = -depthSpeed;
+        }
+        if (Math.abs(velocityZ) < 0.1) velocityZ = 0;
+
+
+        // 3. Calculate Potential Next Position (X, Y, Z)
+        let nextX = playerX + velocityX;
+        let nextY = playerY + velocityY;
+        let nextZ = playerZ + velocityZ;
+
+        // 3b. Clamp Z position to world boundaries
+        nextZ = Math.max(worldMinZ, Math.min(nextZ, worldMaxZ));
+        if (nextZ === worldMinZ || nextZ === worldMaxZ) {
+            velocityZ = 0; // Stop Z movement at boundaries
+        }
+        playerZ = nextZ; // Update player Z *before* collision (visual only for now)
+
+
+        // 4. Horizontal (X) Collision Detection & Resolution (2D check)
+        // (Collision logic remains 2D, ignoring Z for simplicity)
+        isTouchingWallLeft = false;
+        isTouchingWallRight = false;
+        let isTouchingPlatformLeft = false;   // NEW: for platform wall jump
+        let isTouchingPlatformRight = false;  // NEW: for platform wall jump
+        let playerRectHorizontal = {
+            left: nextX, right: nextX + playerWidth,
+            top: playerY, bottom: playerY + playerHeight
+        };
+        let horizontalCollisionOccurred = false;
+
+        obstacles.forEach(obstacle => {
+            if (horizontalCollisionOccurred || levelTransitionTriggered) return;
+
+            let obstacleRect = { left: obstacle.left, right: obstacle.right, top: obstacle.top, bottom: obstacle.bottom };
+
+            if (playerRectHorizontal.right > obstacleRect.left &&
+                playerRectHorizontal.left < obstacleRect.right &&
+                playerRectHorizontal.bottom > obstacleRect.top &&
+                playerRectHorizontal.top < obstacleRect.bottom)
+            {
+                if (obstacle.type === 'enemy') {
+                    restartLevel();
+                    horizontalCollisionOccurred = true;
+                    levelTransitionTriggered = true;
+                    return;
+                }
+
+                if (obstacle.type === 'platform' || obstacle.type === 'wall' || obstacle.type === 'goal') {
+                    if (velocityX > 0) {
+                        nextX = obstacleRect.left - playerWidth;
+                        if (obstacle.type === 'wall') isTouchingWallRight = true;
+                        if (obstacle.type === 'platform' || obstacle.type === 'goal') isTouchingPlatformRight = true;
+                        horizontalCollisionOccurred = true;
+                    } else if (velocityX < 0) {
+                        nextX = obstacleRect.right;
+                        if (obstacle.type === 'wall') isTouchingWallLeft = true;
+                        if (obstacle.type === 'platform' || obstacle.type === 'goal') isTouchingPlatformLeft = true;
+                        horizontalCollisionOccurred = true;
+                    }
+                    velocityX = 0;
+                    // If dashing and hit a wall, end dash immediately
+                    if (dashActive) {
+                        dashActive = false;
+                    }
+                }
+            }
+        });
+
+        if (levelTransitionTriggered) {
+             requestAnimationFrame(gameLoop);
+             return;
+        }
+
+        // Apply world boundary collision horizontally (X)
+        if (nextX < 0) { nextX = 0; velocityX = 0; isTouchingWallLeft = true; if (dashActive) dashActive = false; }
+        if (nextX + playerWidth > worldWidth) { nextX = worldWidth - playerWidth; velocityX = 0; isTouchingWallRight = true; if (dashActive) dashActive = false; }
+
+        playerX = nextX; // Update playerX *before* vertical check
+
+
+        // 5. Vertical (Y) Collision Detection & Resolution (2D check)
+        isOnGround = false;
+        let playerRectVertical = {
+            left: playerX, right: playerX + playerWidth,
+            top: nextY, bottom: nextY + playerHeight
+        };
+        let verticalCollisionOccurred = false;
+
+        obstacles.forEach(obstacle => {
+            if (verticalCollisionOccurred || levelTransitionTriggered) return;
+
+            let obstacleRect = { left: obstacle.left, right: obstacle.right, top: obstacle.top, bottom: obstacle.bottom };
+
+            if (playerRectVertical.right > obstacleRect.left &&
+                playerRectVertical.left < obstacleRect.right &&
+                playerRectVertical.bottom > obstacleRect.top &&
+                playerRectVertical.top < obstacleRect.bottom)
+            {
+                 if (obstacle.type === 'enemy') {
+                     restartLevel();
+                     verticalCollisionOccurred = true;
+                     levelTransitionTriggered = true;
+                     return;
+                 }
+
+                 if (obstacle.type === 'platform' || obstacle.type === 'wall' || obstacle.type === 'goal') {
+                    if (velocityY >= 0) {
+                        if (playerY + playerHeight <= obstacleRect.top + Math.abs(velocityY) + 1) {
+                            nextY = obstacleRect.top - playerHeight;
+                            velocityY = 0;
+                            isOnGround = true;
+                            verticalCollisionOccurred = true;
+
+                            if (obstacle.type === 'goal') {
+                                console.log("Reached Goal!");
+                                loadLevel(currentLevelIndex + 1);
+                                levelTransitionTriggered = true;
+                                return;
+                            }
+                        }
+                    } else if (velocityY < 0) {
+                        if (playerY >= obstacleRect.bottom + velocityY - 1) {
+                            nextY = obstacleRect.bottom;
+                            velocityY = 0;
+                            verticalCollisionOccurred = true;
+                        }
+                    }
+                 }
+            }
+        });
+
+        if (levelTransitionTriggered) {
+             requestAnimationFrame(gameLoop);
+             return;
+        }
+
+        // Apply world boundary collision vertically (ceiling)
+        if (nextY < 0) { nextY = 0; velocityY = 0; }
+
+        // Check if player fell out of the bottom
+        if (nextY > viewportHeight + 50) {
+            restartLevel();
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+
+        playerY = nextY; // Update playerY
+
+
+        // 6. Wall Slide Logic (Uses 2D flags)
+        // Allow wall slide on both walls and platforms
+        if (!isOnGround && ((isTouchingWallLeft || isTouchingWallRight) || (isTouchingPlatformLeft || isTouchingPlatformRight)) && velocityY > 0) {
+            velocityY = Math.min(velocityY, wallSlideSpeed);
+        }
+
+        // 7. Update Wall Jump Possibility (Uses 2D flags)
+        // Allow wall jump on both walls and platforms
+        canWallJump = !isOnGround && (
+            isTouchingWallLeft || isTouchingWallRight ||
+            isTouchingPlatformLeft || isTouchingPlatformRight
+        );
+
+        // For wall jump direction, prefer wall, else platform
+        // We'll update the isTouchingWallLeft/Right flags to include platforms for jump direction
+        let wallJumpLeft = isTouchingWallLeft || isTouchingPlatformLeft;
+        let wallJumpRight = isTouchingWallRight || isTouchingPlatformRight;
+
+        // 8. Update Camera Position (Scrolling - X axis only)
+        let targetCameraX = playerX - viewportWidth / 2 + playerWidth / 2;
+        const playerViewportX = playerX - cameraX;
+        if (playerViewportX < scrollMargin) {
+            targetCameraX = playerX - scrollMargin;
+        } else if (playerViewportX + playerWidth > viewportWidth - scrollMargin) {
+            targetCameraX = playerX + playerWidth - (viewportWidth - scrollMargin);
+        }
+        cameraX = Math.max(0, Math.min(targetCameraX, worldWidth - viewportWidth));
+
+
+        // 9. Update Visuals (Set X/Y position and Z transform)
+        player.style.left = playerX + 'px';
+        player.style.top = playerY + 'px';
+        player.style.transform = `translateZ(${playerZ}px)`; // Update player depth
+
+        // World container transform only needs translateX for scrolling
+        worldContainer.style.transform = `translateX(-${cameraX}px)`;
+
+        // Optional: Update debug info
+        // if (debugInfo) {
+        //     debugInfo.textContent = `Lvl: ${currentLevelIndex+1} X: ${playerX.toFixed(1)}, Y: ${playerY.toFixed(1)}, Z: ${playerZ.toFixed(1)}, vX: ${velocityX.toFixed(1)}, vY: ${velocityY.toFixed(1)}, vZ: ${velocityZ.toFixed(1)}, Ground: ${isOnGround}, WallL: ${isTouchingWallLeft}, WallR: ${isTouchingWallRight}, CanWJ: ${canWallJump}, CamX: ${cameraX.toFixed(1)}`;
+        // }
+
+        // 10. Request Next Frame
+        requestAnimationFrame(gameLoop);
+    }
+
+    // --- Patch: Wall jump on platforms ---
+    // Patch the input handler to use the new wall jump direction logic
+    // (We need to update the event listeners to use wallJumpLeft/wallJumpRight)
+    // We'll do this by wrapping the event listeners in a closure that can access wallJumpLeft/wallJumpRight
+
+    // We'll store the current wall jump direction flags globally so the input handler can use them
+    let wallJumpLeft = false;
+    let wallJumpRight = false;
+
+    // Patch the input handler to use wallJumpLeft/wallJumpRight for wall jump direction
+    document.removeEventListener('keydown', window._platformerKeydownHandler || (()=>{}));
+    window._platformerKeydownHandler = function(event) {
+        if (!gameRunning) return;
+        switch (event.key) {
+            case 'ArrowLeft':
+            case 'a':
+                moveLeft = true;
+                break;
+            case 'ArrowRight':
+            case 'd':
+                moveRight = true;
+                break;
+            case 'ArrowUp': // Use ArrowUp for jump
+                if (isOnGround) {
+                    velocityY = -jumpStrength;
+                    isOnGround = false;
+                } else if (canWallJump) {
+                    velocityY = -wallJumpStrength;
+                    velocityX = wallJumpRight ? -wallJumpHorizontalBoost : wallJumpHorizontalBoost;
+                    isTouchingWallLeft = false;
+                    isTouchingWallRight = false;
+                    // Also clear platform wall jump flags
+                    // (They are recalculated every frame)
+                    canWallJump = false;
+                }
+                break;
+            case ' ':
+                // DASH: Only trigger dash if not holding down (no repeat), dash is available, and not already dashing
+                if (!event.repeat && dashAvailable && !dashActive) {
+                    // Determine dash direction: prefer left/right input, else last direction, else right
+                    if (moveLeft && !moveRight) {
+                        dashDirection = -1;
+                    } else if (moveRight && !moveLeft) {
+                        dashDirection = 1;
+                    } else {
+                        // If neither pressed, dash in last direction or right by default
+                        dashDirection = (velocityX < 0) ? -1 : 1;
+                    }
+                    dashActive = true;
+                    dashAvailable = false;
+                    dashTimer = dashDuration;
+                    dashCooldownTimer = dashCooldown;
+                    // Optionally, play a dash effect here
+                    dashCooldownIndicator.style.display = "block";
+                } else {
+                    // If not dashing, treat as jump (legacy behavior)
+                    if (isOnGround && !dashActive) {
+                        velocityY = -jumpStrength;
+                        isOnGround = false;
+                    } else if (canWallJump && !dashActive) {
+                        velocityY = -wallJumpStrength;
+                        velocityX = wallJumpRight ? -wallJumpHorizontalBoost : wallJumpHorizontalBoost;
+                        isTouchingWallLeft = false;
+                        isTouchingWallRight = false;
+                        canWallJump = false;
+                    }
+                }
+                break;
+            case 'ArrowDown': // Use ArrowDown OR S for backward
+            case 's':
+                moveBackward = true;
+                break;
+            case 'w': // Use W for forward (distinct from jump)
+                 moveForward = true;
+                 break;
+        }
+    };
+    document.addEventListener('keydown', window._platformerKeydownHandler);
+
+    // --- Initial Setup ---
+    loadLevel(currentLevelIndex); // Load the first level
+    requestAnimationFrame(gameLoop); // Start the game loop
+
+</script>
+
+</body>
+</html>

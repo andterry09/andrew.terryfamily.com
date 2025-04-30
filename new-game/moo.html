@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Square Clicker</title>
+  <style>
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      background: linear-gradient(120deg, #232526 0%, #414345 100%);
+      background-size: 400% 400%;
+      animation: bgmove 16s ease-in-out infinite;
+      overflow-x: hidden;
+    }
+    @keyframes bgmove {
+      0% {background-position: 0% 50%;}
+      50% {background-position: 100% 50%;}
+      100% {background-position: 0% 50%;}
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      z-index: 0;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      background: 
+        radial-gradient(circle at 20% 30%, #4caf50aa 0%, transparent 60%),
+        radial-gradient(circle at 80% 70%, #ffeb3baa 0%, transparent 60%),
+        radial-gradient(circle at 60% 20%, #2196f3aa 0%, transparent 60%);
+      opacity: 0.25;
+      mix-blend-mode: lighten;
+    }
+    #container {
+      margin-top: 60px;
+      display: flex;
+      flex-direction: row;
+      gap: 60px;
+      z-index: 1;
+    }
+    #click-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+      z-index: 1;
+    }
+    @keyframes tilt {
+      0%   { transform: rotate(-5deg);}
+      20%  { transform: rotate(4deg);}
+      40%  { transform: rotate(-3deg);}
+      60%  { transform: rotate(3deg);}
+      80%  { transform: rotate(-4deg);}
+      100% { transform: rotate(-5deg);}
+    }
+    #square {
+      width: 220px;
+      height: 220px;
+      background: linear-gradient(135deg, #4caf50 60%, #81c784 100%);
+      border: 7px solid #fff;
+      border-radius: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 6rem;
+      font-weight: bold;
+      cursor: pointer;
+      user-select: none;
+      box-shadow: 0 8px 32px #000a, 0 0 0 8px #4caf5040;
+      transition: transform 0.08s, box-shadow 0.2s;
+      position: relative;
+      z-index: 2;
+      animation: tilt 2.2s ease-in-out infinite;
+    }
+    #square:active {
+      transform: scale(0.96);
+      background: linear-gradient(135deg, #388e3c 60%, #66bb6a 100%);
+      box-shadow: 0 2px 8px #0008, 0 0 0 4px #388e3c40;
+      animation: none;
+    }
+    #square::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 24px;
+      box-shadow: 0 0 32px 8px #fff3 inset;
+      pointer-events: none;
+      opacity: 0.18;
+    }
+    #money {
+      font-size: 2rem;
+      margin-top: 10px;
+      margin-bottom: 0;
+      letter-spacing: 1px;
+      text-shadow: 0 2px 8px #0008;
+    }
+    #per-click {
+      margin-top: 10px;
+      font-size: 1.2rem;
+      color: #aaffaa;
+      text-shadow: 0 2px 8px #0008;
+    }
+    #per-sec {
+      margin-top: 2px;
+      font-size: 1.1rem;
+      color: #81d4fa;
+      text-shadow: 0 2px 8px #0008;
+    }
+    /* Shop bar styles */
+    #shop-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 56px;
+      background: linear-gradient(90deg, #222 60%, #4caf50 100%);
+      color: #fff;
+      font-size: 1.3rem;
+      font-weight: 500;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 10;
+      box-shadow: 0 -2px 16px #0007;
+      transition: background 0.2s;
+      user-select: none;
+    }
+    #shop-bar:hover {
+      background: linear-gradient(90deg, #333 60%, #66bb6a 100%);
+    }
+    /* Side Shop Drawer Styles */
+    #shop-drawer-bg {
+      display: none;
+      position: fixed;
+      z-index: 100;
+      left: 0; top: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.25);
+      transition: background 0.2s;
+    }
+    #shop-drawer-bg.active {
+      display: block;
+    }
+    #shop-drawer {
+      position: fixed;
+      top: 0;
+      right: -400px;
+      width: 360px;
+      max-width: 90vw;
+      height: 100vh;
+      background: #232526;
+      border-left: 2px solid #4caf50;
+      box-shadow: -8px 0 32px #000b;
+      z-index: 101;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0;
+      transition: right 0.32s cubic-bezier(.5,1.7,.7,1.01);
+      overflow: hidden;
+    }
+    #shop-drawer-bg.active #shop-drawer {
+      right: 0;
+      transition: right 0.32s cubic-bezier(.5,1.7,.7,1.01);
+    }
+    #shop-drawer-header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 24px 12px 24px;
+      box-sizing: border-box;
+      border-bottom: 1px solid #333;
+      background: #232526;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    #shop-drawer-header h2 {
+      margin: 0;
+      font-size: 1.6rem;
+      color: #aaffaa;
+      letter-spacing: 1px;
+      text-shadow: 0 2px 8px #0008;
+    }
+    #shop-drawer-close {
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 2rem;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.15s;
+      z-index: 102;
+      margin-left: 16px;
+    }
+    #shop-drawer-close:hover {
+      opacity: 1;
+    }
+    #shop-drawer-content {
+      flex: 1 1 auto;
+      width: 100%;
+      overflow-y: auto;
+      padding: 18px 24px 24px 24px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+      max-height: calc(100vh - 70px);
+    }
+    .shop-item {
+      background: linear-gradient(90deg, #333 60%, #4caf50 100%);
+      border-radius: 12px;
+      padding: 18px 24px;
+      margin: 0;
+      color: #fff;
+      font-size: 1.15rem;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      box-shadow: 0 2px 8px #0005;
+      min-width: 220px;
+      justify-content: space-between;
+    }
+    .shop-btn {
+      background: #4caf50;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 18px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.15s;
+      box-shadow: 0 2px 8px #0003;
+    }
+    .shop-btn:disabled {
+      background: #888;
+      cursor: not-allowed;
+      color: #eee;
+    }
+    /* Hide old modal */
+    #shop-modal-bg, #shop-modal {
+      display: none !important;
+    }
+    /* Back button styles */
+    #back-button {
+      position: fixed;
+      top: 18px;
+      left: 18px;
+      z-index: 20;
+      background: linear-gradient(90deg, #333 60%, #4caf50 100%);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 22px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 2px 8px #0005;
+      transition: background 0.15s, color 0.15s;
+      letter-spacing: 1px;
+      text-shadow: 0 2px 8px #0008;
+    }
+    #back-button:hover {
+      background: linear-gradient(90deg, #222 60%, #66bb6a 100%);
+      color: #aaffaa;
+    }
+  </style>
+</head>
+<body>
+  <button id="back-button" title="Go Back">&larr; Back</button>
+  <h1 style="margin-top:32px;letter-spacing:2px;text-shadow:0 2px 12px #000a;">Square Money Clicker</h1>
+  <div id="container">
+    <div id="click-area">
+      <div id="square" title="Click me!">■</div>
+      <div id="money">Square Money: <span id="money-amount">0</span></div>
+      <div id="per-click">Per Click: <span id="per-click-amount">1</span></div>
+      <div id="per-sec" style="display:none;">Per Second: <span id="per-sec-amount">0</span></div>
+    </div>
+  </div>
+  <!-- Shop Bar -->
+  <div id="shop-bar" title="Open Shop 🛒">🛒 Shop</div>
+  <!-- Side Shop Drawer -->
+  <div id="shop-drawer-bg">
+    <div id="shop-drawer">
+      <div id="shop-drawer-header">
+        <h2>Shop</h2>
+        <button id="shop-drawer-close" title="Close Shop">&times;</button>
+      </div>
+      <div id="shop-drawer-content">
+        <div class="shop-item">
+          <span>+1 Click Power<br>
+            <span style="font-size:0.95em;color:#aaffaa;">(25 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-click-power">Buy</button>
+        </div>
+        <!-- Example: Add more items to demonstrate scrolling -->
+        <div class="shop-item">
+          <span>+1 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(100 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-100">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+10 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(500 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-10">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+100 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(6500 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-100x">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+2000 Click Power<br>
+            <span style="font-size:0.95em;color:#aaffaa;">(150,000 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-click-power-2000">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+250,000 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(20,000,000 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-250k">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+5,000,000 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(125,000,000 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-5m">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+2,000,000 Click Power<br>
+            <span style="font-size:0.95em;color:#aaffaa;">(400,000,000 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-click-power-2m">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+100,000,000 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(5,000,000,000 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-100m">Buy</button>
+        </div>
+        <div class="shop-item">
+          <span>+5,000,000,000 Per Second<br>
+            <span style="font-size:0.95em;color:#81d4fa;">(100,000,000 Squares)</span>
+          </span>
+          <button class="shop-btn" id="buy-per-sec-5b">Buy</button>
+        </div>
+        <!-- Add more items as needed for scrolling demo -->
+      </div>
+    </div>
+  </div>
+  <!-- Old modal kept for compatibility but hidden -->
+  <div id="shop-modal-bg">
+    <div id="shop-modal">
+      <button id="shop-close" title="Close Shop">&times;</button>
+      <h2>Shop</h2>
+      <div class="shop-item">
+        <span>+1 Click Power<br>
+          <span style="font-size:0.95em;color:#aaffaa;">(25 Squares)</span>
+        </span>
+        <button class="shop-btn" id="buy-click-power-legacy">Buy</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // On every start, clear all progress
+    localStorage.removeItem('square-money');
+
+    // Game state
+    let money = 0;
+    let perClick = 1;
+    let perSec = 0;
+
+    // DOM elements
+    const moneyAmount = document.getElementById('money-amount');
+    const perClickAmount = document.getElementById('per-click-amount');
+    const perSecAmount = document.getElementById('per-sec-amount');
+    const perSecDiv = document.getElementById('per-sec');
+    const square = document.getElementById('square');
+    const shopBar = document.getElementById('shop-bar');
+    const shopDrawerBg = document.getElementById('shop-drawer-bg');
+    const shopDrawer = document.getElementById('shop-drawer');
+    const shopDrawerClose = document.getElementById('shop-drawer-close');
+    const buyClickPower = document.getElementById('buy-click-power');
+    const buyClickPower5 = document.getElementById('buy-click-power-5');
+    const buyClickPower10 = document.getElementById('buy-click-power-10');
+    const buyClickPower2000 = document.getElementById('buy-click-power-2000');
+    const buyClickPower2m = document.getElementById('buy-click-power-2m');
+    const buyPerSec = document.getElementById('buy-per-sec');
+    const buyPerSec5 = document.getElementById('buy-per-sec-5');
+    const buyGoldenSquare = document.getElementById('buy-golden-square');
+    const buyPerSec100 = document.getElementById('buy-per-sec-100');
+    const buyPerSec10 = document.getElementById('buy-per-sec-10');
+    const buyPerSec100x = document.getElementById('buy-per-sec-100x');
+    const buyPerSec250k = document.getElementById('buy-per-sec-250k');
+    const buyPerSec5m = document.getElementById('buy-per-sec-5m');
+    const buyPerSec100m = document.getElementById('buy-per-sec-100m');
+    const buyPerSec5b = document.getElementById('buy-per-sec-5b');
+    const backButton = document.getElementById('back-button');
+
+    function updateUI() {
+      moneyAmount.textContent = money;
+      perClickAmount.textContent = perClick;
+      if (perSec > 0) {
+        perSecDiv.style.display = '';
+        perSecAmount.textContent = perSec;
+      } else {
+        perSecDiv.style.display = 'none';
+      }
+      // Enable/disable shop buy buttons
+      buyClickPower.disabled = money < 25;
+      if (buyPerSec100) buyPerSec100.disabled = money < 100;
+      if (buyClickPower5) buyClickPower5.disabled = money < 100;
+      if (buyClickPower10) buyClickPower10.disabled = money < 200;
+      if (buyClickPower2000) buyClickPower2000.disabled = money < 150000;
+      if (buyClickPower2m) buyClickPower2m.disabled = money < 400000000;
+      if (buyPerSec10) buyPerSec10.disabled = money < 500;
+      if (buyPerSec) buyPerSec.disabled = money < 150;
+      if (buyPerSec5) buyPerSec5.disabled = money < 600;
+      if (buyGoldenSquare) buyGoldenSquare.disabled = money < 1000;
+      if (buyPerSec100x) buyPerSec100x.disabled = money < 6500;
+      if (buyPerSec250k) buyPerSec250k.disabled = money < 20000000;
+      if (buyPerSec5m) buyPerSec5m.disabled = money < 125000000;
+      if (buyPerSec100m) buyPerSec100m.disabled = money < 5000000000;
+      if (buyPerSec5b) buyPerSec5b.disabled = money < 100000000;
+    }
+
+    square.addEventListener('click', () => {
+      money += perClick;
+      updateUI();
+    });
+
+    // Shop bar click opens side drawer
+    shopBar.addEventListener('click', () => {
+      shopDrawerBg.classList.add('active');
+      // Prevent body scroll when shop is open
+      document.body.style.overflow = 'hidden';
+    });
+
+    // Shop drawer close button
+    shopDrawerClose.addEventListener('click', () => {
+      shopDrawerBg.classList.remove('active');
+      document.body.style.overflow = '';
+    });
+
+    // Clicking outside drawer closes shop
+    shopDrawerBg.addEventListener('click', (e) => {
+      if (e.target === shopDrawerBg) {
+        shopDrawerBg.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+    });
+
+    // Buy +1 click power for 25 squares
+    buyClickPower.addEventListener('click', () => {
+      if (money >= 25) {
+        money -= 25;
+        perClick += 1;
+        updateUI();
+      }
+    });
+
+    // Buy +1 per second for 100 squares (second box)
+    if (buyPerSec100) {
+      buyPerSec100.addEventListener('click', () => {
+        if (money >= 100) {
+          money -= 100;
+          perSec += 1;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +5 click power for 100 squares (now third box, but keep for compatibility)
+    if (buyClickPower5) {
+      buyClickPower5.addEventListener('click', () => {
+        if (money >= 100) {
+          money -= 100;
+          perClick += 5;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +10 click power for 200 squares
+    if (buyClickPower10) {
+      buyClickPower10.addEventListener('click', () => {
+        if (money >= 200) {
+          money -= 200;
+          perClick += 10;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +2000 click power for 150,000 squares (fifth box)
+    if (buyClickPower2000) {
+      buyClickPower2000.addEventListener('click', () => {
+        if (money >= 150000) {
+          money -= 150000;
+          perClick += 2000;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +2,000,000 click power for 400,000,000 squares (eighth box)
+    if (buyClickPower2m) {
+      buyClickPower2m.addEventListener('click', () => {
+        if (money >= 400000000) {
+          money -= 400000000;
+          perClick += 2000000;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +10 per second for 500 squares (third box)
+    if (buyPerSec10) {
+      buyPerSec10.addEventListener('click', () => {
+        if (money >= 500) {
+          money -= 500;
+          perSec += 10;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +100 per second for 6500 squares (fourth box)
+    if (buyPerSec100x) {
+      buyPerSec100x.addEventListener('click', () => {
+        if (money >= 6500) {
+          money -= 6500;
+          perSec += 100;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +250,000 per second for 20,000,000 squares (sixth box)
+    if (buyPerSec250k) {
+      buyPerSec250k.addEventListener('click', () => {
+        if (money >= 20000000) {
+          money -= 20000000;
+          perSec += 250000;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +5,000,000 per second for 125,000,000 squares (seventh box)
+    if (buyPerSec5m) {
+      buyPerSec5m.addEventListener('click', () => {
+        if (money >= 125000000) {
+          money -= 125000000;
+          perSec += 5000000;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +100,000,000 per second for 5,000,000,000 squares (ninth box)
+    if (buyPerSec100m) {
+      buyPerSec100m.addEventListener('click', () => {
+        if (money >= 5000000000) {
+          money -= 5000000000;
+          perSec += 100000000;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +5,000,000,000 per second for 100,000,000 squares (tenth box)
+    if (buyPerSec5b) {
+      buyPerSec5b.addEventListener('click', () => {
+        if (money >= 100000000) {
+          money -= 100000000;
+          perSec += 5000000000;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +1 per second for 150 squares (no longer in shop, but keep for compatibility)
+    if (buyPerSec) {
+      buyPerSec.addEventListener('click', () => {
+        if (money >= 150) {
+          money -= 150;
+          perSec += 1;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy +5 per second for 600 squares
+    if (buyPerSec5) {
+      buyPerSec5.addEventListener('click', () => {
+        if (money >= 600) {
+          money -= 600;
+          perSec += 5;
+          updateUI();
+        }
+      });
+    }
+
+    // Buy golden square (cosmetic)
+    if (buyGoldenSquare) {
+      buyGoldenSquare.addEventListener('click', () => {
+        if (money >= 1000) {
+          money -= 1000;
+          // Cosmetic: change square color
+          square.style.background = "linear-gradient(135deg, #ffd700 60%, #fffbe6 100%)";
+          square.style.borderColor = "#fffbe6";
+          updateUI();
+        }
+      });
+    }
+
+    // Per second income
+    setInterval(() => {
+      if (perSec > 0) {
+        money += perSec;
+        updateUI();
+      }
+    }, 1000);
+
+    // Do not load from localStorage, always start fresh
+    updateUI();
+
+    // Save progress (will always be fresh for this session)
+    setInterval(() => {
+      localStorage.setItem('square-money', JSON.stringify({
+        money, perClick, perSec
+      }));
+    }, 1000);
+
+    // Back button logic: go to ll.html
+    backButton.addEventListener('click', function() {
+      window.location.href = "file:///Users/Melanie/git/andrew-game/ll.html";
+    });
+  </script>
+</body>
+</html>

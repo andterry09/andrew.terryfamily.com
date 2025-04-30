@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Base Defense</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: radial-gradient(ellipse at center, #0a0a1a 0%, #000 100%);
+      color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #game-canvas {
+      display: block;
+      margin: 0 auto;
+      background: transparent;
+      box-shadow: 0 0 32px #000a;
+      border: 2px solid #222;
+    }
+    #ui-panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(20, 20, 40, 0.85);
+      padding: 14px 18px;
+      border-radius: 12px;
+      z-index: 2;
+      min-width: 220px;
+      font-size: 1.05em;
+      box-shadow: 0 2px 12px #0008;
+    }
+    #ui-panel h2 {
+      margin: 0 0 8px 0;
+      font-size: 1.2em;
+      letter-spacing: 1px;
+    }
+    #ui-panel button {
+      margin: 6px 0;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      background: #2e3a6a;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #ui-panel button:disabled {
+      background: #444a;
+      color: #ccc;
+      cursor: not-allowed;
+    }
+    #log {
+      margin-top: 10px;
+      max-height: 80px;
+      overflow-y: auto;
+      font-size: 0.95em;
+      color: #b8eaff;
+    }
+    #game-over {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(30, 10, 40, 0.97);
+      padding: 40px 60px;
+      border-radius: 18px;
+      text-align: center;
+      font-size: 2em;
+      color: #fff;
+      z-index: 10;
+      box-shadow: 0 0 40px #000c;
+      display: none;
+    }
+    #game-over button {
+      margin-top: 24px;
+      font-size: 1em;
+      padding: 10px 28px;
+      border-radius: 8px;
+      background: #2e3a6a;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas" width="900" height="600"></canvas>
+    <div id="ui-panel">
+      <h2>Base Defense</h2>
+      <div>
+        <b>Credits:</b> <span id="credits">0</span><br>
+        <b>Base HP:</b> <span id="base-hp">0</span><br>
+        <b>Wave:</b> <span id="wave">1</span>
+      </div>
+      <div style="margin-top:10px;">
+        <button id="build-turret">Build Turret (100)</button><br>
+        <button id="build-missile-launcher">Build Missile Launcher (200)</button><br>
+        <button id="upgrade-turrets">Upgrade Turrets (150)</button>
+      </div>
+      <div id="log"></div>
+    </div>
+    <div id="game-over">
+      <div id="game-over-text"></div>
+      <button onclick="restartGame()">Restart</button>
+    </div>
+  </div>
+  <script>
+    // --- Game Constants ---
+    const CANVAS_W = 900, CANVAS_H = 600;
+    const BASE_RADIUS = 48;
+    const ENEMY_RADIUS = 18;
+    const TURRET_RADIUS = 16;
+    const MISSILE_LAUNCHER_RADIUS = 14;
+    const ENEMY_COLORS = ["#ff4d4d", "#ffb84d", "#4dd2ff", "#b84dff"];
+    const TURRET_COLOR = "#6cf";
+    const MISSILE_LAUNCHER_COLOR = "#f6f";
+    const BASE_COLOR = "#fff";
+    const ENEMY_SPEED_BASE = 0.7;
+    const ENEMY_HP_BASE = 30;
+    const ENEMY_REWARD = 20;
+    const TURRET_COST = 100;
+    const MISSILE_LAUNCHER_COST = 200;
+    const TURRET_UPGRADE_COST = 150;
+    const TURRET_FIRE_RATE = 1.2; // seconds
+    const TURRET_RANGE = 180;
+    const MISSILE_LAUNCHER_RANGE = 260;
+    const MISSILE_RANGE = 320;
+    const MISSILE_DAMAGE = 60;
+    const TURRET_DAMAGE = 18;
+    const MISSILE_LAUNCHER_FIRE_RATE = 5.5; // seconds (was 3.5)
+    const ENEMIES_PER_WAVE_BASE = 7;
+    const WAVE_INTERVAL = 3500; // ms
+    const ENEMY_SPAWN_INTERVAL = 700; // ms
+
+    // --- Boss Constants ---
+    const BOSS_WAVE_INTERVAL = 5; // Every 5 waves, a boss appears
+    const BOSS_RADIUS = 36;
+    const BOSS_COLOR = "#ff0";
+    const BOSS_HP_BASE = 400;
+    const BOSS_SPEED_BASE = 0.45;
+    const BOSS_REWARD_BASE = 200;
+
+    // --- Game State ---
+    let credits = 200;
+    let baseHP = 200;
+    let wave = 1;
+    let turrets = [];
+    let missileLaunchers = [];
+    let missiles = [];
+    let enemies = [];
+    let projectiles = [];
+    let gameOver = false;
+    let turretLevel = 1;
+    let missileLauncherLevel = 1;
+    let logLines = [];
+    let nextEnemySpawn = 0;
+    let enemiesToSpawn = 0;
+    let lastWaveTime = 0;
+    let isBossWave = false;
+    let bossSpawned = false;
+
+    // --- Canvas Setup ---
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- UI Elements ---
+    const creditsSpan = document.getElementById('credits');
+    const baseHPSpan = document.getElementById('base-hp');
+    const waveSpan = document.getElementById('wave');
+    const logDiv = document.getElementById('log');
+    const gameOverDiv = document.getElementById('game-over');
+    const gameOverText = document.getElementById('game-over-text');
+    document.getElementById('build-turret').onclick = () => tryBuildTurret();
+    document.getElementById('build-missile-launcher').onclick = () => tryBuildMissileLauncher();
+    document.getElementById('upgrade-turrets').onclick = () => tryUpgradeTurrets();
+
+    // --- Utility Functions ---
+    function dist(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+    function angleTo(a, b) {
+      return Math.atan2(b.y - a.y, b.x - a.x);
+    }
+    function addLog(msg) {
+      logLines.push(msg);
+      if (logLines.length > 6) logLines.shift();
+      logDiv.innerHTML = logLines.map(l => "&#8226; " + l).join("<br>");
+    }
+
+    // --- Game Entities ---
+    function spawnEnemy() {
+      // Boss wave logic
+      if (isBossWave && !bossSpawned) {
+        // Spawn boss at random edge
+        let edge = Math.floor(Math.random() * 4);
+        let x, y;
+        if (edge === 0) { x = 0; y = Math.random() * CANVAS_H; }
+        else if (edge === 1) { x = CANVAS_W; y = Math.random() * CANVAS_H; }
+        else if (edge === 2) { x = Math.random() * CANVAS_W; y = 0; }
+        else { x = Math.random() * CANVAS_W; y = CANVAS_H; }
+        let bossHP = BOSS_HP_BASE + (wave-1)*120 + Math.floor(Math.random()*60);
+        let bossSpeed = BOSS_SPEED_BASE + (wave-1)*0.03 + Math.random()*0.05;
+        let bossReward = BOSS_REWARD_BASE + Math.floor(wave*25);
+        enemies.push({
+          x, y,
+          hp: bossHP,
+          maxHP: bossHP,
+          speed: bossSpeed,
+          color: BOSS_COLOR,
+          angle: angleTo({x, y}, {x: CANVAS_W/2, y: CANVAS_H/2}),
+          reachedBase: false,
+          isBoss: true,
+          radius: BOSS_RADIUS,
+          reward: bossReward
+        });
+        bossSpawned = true;
+        addLog("BOSS WAVE! A boss approaches!");
+        return;
+      }
+
+      // Normal enemy
+      let edge = Math.floor(Math.random() * 4);
+      let x, y;
+      if (edge === 0) { x = 0; y = Math.random() * CANVAS_H; }
+      else if (edge === 1) { x = CANVAS_W; y = Math.random() * CANVAS_H; }
+      else if (edge === 2) { x = Math.random() * CANVAS_W; y = 0; }
+      else { x = Math.random() * CANVAS_W; y = CANVAS_H; }
+
+      // Difficulty scaling: exponential HP and speed increase
+      let hp = ENEMY_HP_BASE * Math.pow(1.18, wave-1) + Math.floor(Math.random()*10 + wave*2);
+      let speed = ENEMY_SPEED_BASE + (wave-1)*0.09 + Math.random()*0.12 + Math.min(0.25, (wave-1)*0.01);
+      let color = ENEMY_COLORS[Math.floor(Math.random()*ENEMY_COLORS.length)];
+      enemies.push({
+        x, y, hp, maxHP: hp, speed, color,
+        angle: angleTo({x, y}, {x: CANVAS_W/2, y: CANVAS_H/2}),
+        reachedBase: false,
+        isBoss: false,
+        radius: ENEMY_RADIUS,
+        reward: ENEMY_REWARD + Math.floor(wave*2.5)
+      });
+    }
+
+    function tryBuildTurret() {
+      if (credits < TURRET_COST) {
+        addLog("Not enough credits for turret!");
+        return;
+      }
+      addLog("Click on the map to place a turret.");
+      let handler = function(e) {
+        let rect = canvas.getBoundingClientRect();
+        let x = (e.clientX - rect.left) * (canvas.width / rect.width);
+        let y = (e.clientY - rect.top) * (canvas.height / rect.height);
+        // Don't allow on base
+        if (dist({x, y}, {x: CANVAS_W/2, y: CANVAS_H/2}) < BASE_RADIUS + 40) {
+          addLog("Too close to base!");
+          canvas.removeEventListener('click', handler);
+          return;
+        }
+        // Don't allow on other turrets or missile launchers
+        for (let t of turrets) {
+          if (dist({x, y}, t) < TURRET_RADIUS*2+10) {
+            addLog("Too close to another turret!");
+            canvas.removeEventListener('click', handler);
+            return;
+          }
+        }
+        for (let ml of missileLaunchers) {
+          if (dist({x, y}, ml) < TURRET_RADIUS*2+10) {
+            addLog("Too close to a missile launcher!");
+            canvas.removeEventListener('click', handler);
+            return;
+          }
+        }
+        turrets.push({
+          x, y,
+          cooldown: 0,
+          level: turretLevel
+        });
+        credits -= TURRET_COST;
+        addLog("Turret built!");
+        updateUI();
+        canvas.removeEventListener('click', handler);
+      };
+      canvas.addEventListener('click', handler);
+    }
+
+    function tryBuildMissileLauncher() {
+      if (credits < MISSILE_LAUNCHER_COST) {
+        addLog("Not enough credits for missile launcher!");
+        return;
+      }
+      addLog("Click on the map to place a missile launcher.");
+      let handler = function(e) {
+        let rect = canvas.getBoundingClientRect();
+        let x = (e.clientX - rect.left) * (canvas.width / rect.width);
+        let y = (e.clientY - rect.top) * (canvas.height / rect.height);
+        // Don't allow on base
+        if (dist({x, y}, {x: CANVAS_W/2, y: CANVAS_H/2}) < BASE_RADIUS + 40) {
+          addLog("Too close to base!");
+          canvas.removeEventListener('click', handler);
+          return;
+        }
+        // Don't allow on other missile launchers or turrets
+        for (let ml of missileLaunchers) {
+          if (dist({x, y}, ml) < TURRET_RADIUS*2+10) {
+            addLog("Too close to another missile launcher!");
+            canvas.removeEventListener('click', handler);
+            return;
+          }
+        }
+        for (let t of turrets) {
+          if (dist({x, y}, t) < TURRET_RADIUS*2+10) {
+            addLog("Too close to a turret!");
+            canvas.removeEventListener('click', handler);
+            return;
+          }
+        }
+        missileLaunchers.push({
+          x, y,
+          cooldown: 0,
+          level: missileLauncherLevel
+        });
+        credits -= MISSILE_LAUNCHER_COST;
+        addLog("Missile launcher built!");
+        updateUI();
+        canvas.removeEventListener('click', handler);
+      };
+      canvas.addEventListener('click', handler);
+    }
+
+    function tryUpgradeTurrets() {
+      if (credits < TURRET_UPGRADE_COST) {
+        addLog("Not enough credits to upgrade!");
+        return;
+      }
+      turretLevel++;
+      for (let t of turrets) t.level = turretLevel;
+      credits -= TURRET_UPGRADE_COST;
+      addLog("All turrets upgraded to level " + turretLevel + "!");
+      updateUI();
+    }
+
+    function updateUI() {
+      creditsSpan.textContent = credits;
+      baseHPSpan.textContent = baseHP;
+      waveSpan.textContent = wave;
+      document.getElementById('build-turret').disabled = credits < TURRET_COST;
+      document.getElementById('build-missile-launcher').disabled = credits < MISSILE_LAUNCHER_COST;
+      document.getElementById('upgrade-turrets').disabled = credits < TURRET_UPGRADE_COST;
+    }
+
+    // --- Game Loop ---
+    function gameLoop(ts) {
+      if (gameOver) return;
+      // --- Spawning Enemies ---
+      if (enemiesToSpawn > 0 && performance.now() > nextEnemySpawn) {
+        spawnEnemy();
+        enemiesToSpawn--;
+        nextEnemySpawn = performance.now() + ENEMY_SPAWN_INTERVAL;
+      }
+      // --- Next Wave ---
+      if (enemies.length === 0 && enemiesToSpawn === 0 && performance.now() - lastWaveTime > WAVE_INTERVAL) {
+        wave++;
+        // Boss wave logic
+        isBossWave = (wave % BOSS_WAVE_INTERVAL === 0);
+        bossSpawned = false;
+        if (isBossWave) {
+          enemiesToSpawn = 1; // Only one boss per boss wave
+          addLog("Prepare for a BOSS WAVE!");
+        } else {
+          // Difficulty scaling: more enemies per wave, increases faster
+          enemiesToSpawn = Math.floor(ENEMIES_PER_WAVE_BASE + wave * 1.7 + Math.pow(wave, 1.15));
+        }
+        lastWaveTime = performance.now();
+        addLog("Wave " + wave + " incoming!");
+        updateUI();
+      }
+
+      // --- Update Enemies ---
+      for (let enemy of enemies) {
+        if (enemy.reachedBase) continue;
+        let base = {x: CANVAS_W/2, y: CANVAS_H/2};
+        let dx = base.x - enemy.x, dy = base.y - enemy.y;
+        let d = Math.hypot(dx, dy);
+        let rad = enemy.radius || ENEMY_RADIUS;
+        if (d < BASE_RADIUS + rad) {
+          enemy.reachedBase = true;
+          // Bosses do more damage to base
+          let dmg = enemy.isBoss ? Math.ceil(enemy.hp/4) : Math.ceil(enemy.hp/10);
+          baseHP -= dmg;
+          addLog((enemy.isBoss ? "BOSS" : "Base") + " hit! -" + dmg + " HP");
+          if (baseHP <= 0) {
+            baseHP = 0;
+            endGame(false);
+          }
+          updateUI();
+        } else {
+          enemy.x += Math.cos(enemy.angle) * enemy.speed;
+          enemy.y += Math.sin(enemy.angle) * enemy.speed;
+        }
+      }
+
+      // --- Update Turrets ---
+      for (let turret of turrets) {
+        turret.cooldown -= 1/60;
+        if (turret.cooldown <= 0) {
+          // Find nearest enemy in range
+          let best = null, bestDist = 99999;
+          for (let enemy of enemies) {
+            if (enemy.reachedBase) continue;
+            let d = dist(turret, enemy);
+            if (d < TURRET_RANGE && d < bestDist) {
+              best = enemy;
+              bestDist = d;
+            }
+          }
+          if (best) {
+            // Fire!
+            projectiles.push({
+              x: turret.x, y: turret.y,
+              tx: best.x, ty: best.y,
+              angle: angleTo(turret, best),
+              speed: 7 + turret.level*0.7,
+              damage: TURRET_DAMAGE + (turret.level-1)*7,
+              color: "#6cf"
+            });
+            turret.cooldown = TURRET_FIRE_RATE - turret.level*0.13;
+            if (turret.cooldown < 0.4) turret.cooldown = 0.4;
+          }
+        }
+      }
+
+      // --- Update Missile Launchers ---
+      for (let ml of missileLaunchers) {
+        ml.cooldown -= 1/60;
+        if (ml.cooldown <= 0) {
+          // Find cluster of enemies in range
+          let best = null, bestCount = 0;
+          for (let enemy of enemies) {
+            if (enemy.reachedBase) continue;
+            // Count how many enemies are within missile explosion range
+            let count = 0;
+            for (let e2 of enemies) {
+              if (e2.reachedBase) continue;
+              if (dist(enemy, e2) < MISSILE_RANGE/2) count++;
+            }
+            if (dist(ml, enemy) < MISSILE_LAUNCHER_RANGE && count > bestCount) {
+              best = enemy;
+              bestCount = count;
+            }
+          }
+          if (best) {
+            // Fire missile at best cluster
+            missiles.push({
+              x: ml.x, y: ml.y,
+              tx: best.x, ty: best.y,
+              progress: 0,
+              exploded: false,
+              damage: MISSILE_DAMAGE + wave*7 + (ml.level-1)*15
+              // We'll add explosionTime and explosionFade here when needed
+            });
+            ml.cooldown = MISSILE_LAUNCHER_FIRE_RATE - ml.level*0.25;
+            if (ml.cooldown < 1.2) ml.cooldown = 1.2;
+            addLog("Missile launched from launcher!");
+          }
+        }
+      }
+
+      // --- Update Projectiles ---
+      for (let p of projectiles) {
+        let dx = p.tx - p.x, dy = p.ty - p.y;
+        let d = Math.hypot(dx, dy);
+        if (d < 8) {
+          // Hit!
+          let hit = null;
+          for (let enemy of enemies) {
+            if (enemy.reachedBase) continue;
+            let rad = enemy.radius || ENEMY_RADIUS;
+            if (dist(p, enemy) < rad+6) {
+              hit = enemy;
+              break;
+            }
+          }
+          if (hit) {
+            hit.hp -= p.damage;
+            if (hit.hp <= 0) {
+              credits += hit.reward || (ENEMY_REWARD + Math.floor(wave*2.5));
+              addLog((hit.isBoss ? "BOSS destroyed! +" : "Enemy destroyed! +") + (hit.reward || (ENEMY_REWARD + Math.floor(wave*2.5))) + " credits");
+              updateUI();
+            }
+          }
+          p.done = true;
+        } else {
+          p.x += Math.cos(p.angle) * p.speed;
+          p.y += Math.sin(p.angle) * p.speed;
+        }
+      }
+      projectiles = projectiles.filter(p => !p.done);
+
+      // --- Update Missiles ---
+      for (let m of missiles) {
+        if (m.exploded) {
+          // Explosion fade logic
+          if (m.explosionTime === undefined) {
+            m.explosionTime = performance.now();
+          }
+          m.explosionFade = (performance.now() - m.explosionTime) / 1000;
+        } else {
+          m.progress += 0.022;
+          if (m.progress >= 1) {
+            m.x = m.tx; m.y = m.ty;
+            m.exploded = true;
+            m.explosionTime = performance.now();
+            m.explosionFade = 0;
+            // Damage all enemies in range
+            let hits = 0;
+            for (let enemy of enemies) {
+              if (enemy.reachedBase) continue;
+              let rad = enemy.radius || ENEMY_RADIUS;
+              if (dist(m, enemy) < MISSILE_RANGE/2 + rad/2) {
+                enemy.hp -= m.damage;
+                hits++;
+              }
+            }
+            addLog("Missile exploded! " + (hits ? hits + " enemies hit!" : "No enemies hit."));
+          } else {
+            m.x = m.x + (m.tx - m.x) * m.progress;
+            m.y = m.y + (m.ty - m.y) * m.progress;
+          }
+        }
+      }
+
+      // Remove missiles whose explosion has faded for more than 1 second
+      missiles = missiles.filter(m => !m.exploded || (m.explosionFade !== undefined && m.explosionFade < 1));
+
+      // --- Remove Dead Enemies ---
+      enemies = enemies.filter(e => e.hp > 0 && !e.reachedBase);
+
+      // --- Draw Everything ---
+      drawGame();
+
+      // --- Next Frame ---
+      if (!gameOver) requestAnimationFrame(gameLoop);
+    }
+
+    function drawGame() {
+      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
+      // Draw base
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(CANVAS_W/2, CANVAS_H/2, BASE_RADIUS, 0, 2*Math.PI);
+      ctx.fillStyle = BASE_COLOR;
+      ctx.shadowColor = "#fff";
+      ctx.shadowBlur = 18;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "#6cf";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.restore();
+
+      // Draw turrets
+      for (let t of turrets) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, TURRET_RADIUS, 0, 2*Math.PI);
+        ctx.fillStyle = TURRET_COLOR;
+        ctx.globalAlpha = 0.92;
+        ctx.shadowColor = "#6cf";
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+        // Draw level
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 13px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(t.level, t.x, t.y);
+        ctx.restore();
+      }
+
+      // Draw missile launchers
+      for (let ml of missileLaunchers) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(ml.x, ml.y, MISSILE_LAUNCHER_RADIUS, 0, 2*Math.PI);
+        ctx.fillStyle = MISSILE_LAUNCHER_COLOR;
+        ctx.globalAlpha = 0.92;
+        ctx.shadowColor = "#f6f";
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+        // Draw level
+        ctx.fillStyle = "#222";
+        ctx.font = "bold 13px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(ml.level, ml.x, ml.y);
+        ctx.restore();
+      }
+
+      // Draw missiles
+      for (let m of missiles) {
+        if (!m.exploded) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, 10, 0, 2*Math.PI);
+          ctx.fillStyle = MISSILE_LAUNCHER_COLOR;
+          ctx.globalAlpha = 0.8;
+          ctx.shadowColor = "#f6f";
+          ctx.shadowBlur = 12;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        } else {
+          // Explosion with fade
+          let fade = 1;
+          if (m.explosionFade !== undefined) {
+            fade = Math.max(0, 1 - m.explosionFade);
+          }
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, MISSILE_RANGE/2, 0, 2*Math.PI);
+          ctx.globalAlpha = 0.13 * fade;
+          ctx.fillStyle = "rgba(255, 100, 255, 1)";
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+      }
+
+      // Draw projectiles
+      for (let p of projectiles) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, 2*Math.PI);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.85;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+
+      // Draw enemies
+      for (let e of enemies) {
+        ctx.save();
+        ctx.beginPath();
+        let rad = e.radius || ENEMY_RADIUS;
+        ctx.arc(e.x, e.y, rad, 0, 2*Math.PI);
+        ctx.fillStyle = e.isBoss ? BOSS_COLOR : e.color;
+        ctx.globalAlpha = e.isBoss ? 0.98 : 0.93;
+        ctx.shadowColor = e.isBoss ? "#ff0" : e.color;
+        ctx.shadowBlur = e.isBoss ? 22 : 12;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = e.isBoss ? "#f80" : "#fff";
+        ctx.stroke();
+        // HP bar
+        let hpFrac = Math.max(0, e.hp/e.maxHP);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(e.x-16, e.y+rad+4, 32, 5);
+        ctx.fillStyle = e.isBoss ? "#ff0" : "#0f0";
+        ctx.fillRect(e.x-16, e.y+rad+4, 32*hpFrac, 5);
+        // Boss label
+        if (e.isBoss) {
+          ctx.fillStyle = "#ff0";
+          ctx.font = "bold 14px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText("BOSS", e.x, e.y - rad - 4);
+        }
+        ctx.restore();
+      }
+    }
+
+    function endGame(win) {
+      gameOver = true;
+      gameOverDiv.style.display = "block";
+      gameOverText.textContent = win ? "You Win!" : "Game Over";
+    }
+
+    function restartGame() {
+      credits = 100;
+      baseHP = 200;
+      wave = 1;
+      turrets = [];
+      missileLaunchers = [];
+      missiles = [];
+      enemies = [];
+      projectiles = [];
+      gameOver = false;
+      turretLevel = 1;
+      missileLauncherLevel = 1;
+      logLines = [];
+      nextEnemySpawn = 0;
+      enemiesToSpawn = ENEMIES_PER_WAVE_BASE;
+      lastWaveTime = performance.now();
+      isBossWave = false;
+      bossSpawned = false;
+      updateUI();
+      gameOverDiv.style.display = "none";
+      addLog("Game restarted!");
+      requestAnimationFrame(gameLoop);
+    }
+
+    // --- Start Game ---
+    function startGame() {
+      updateUI();
+      addLog("Defend your base! Build turrets and missile launchers.");
+      enemiesToSpawn = ENEMIES_PER_WAVE_BASE;
+      lastWaveTime = performance.now();
+      isBossWave = false;
+      bossSpawned = false;
+      requestAnimationFrame(gameLoop);
+    }
+    startGame();
+  </script>
+</body>
+</html>
