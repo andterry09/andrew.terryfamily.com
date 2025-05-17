@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magical Cursor</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            background: #1a1a1a;
+            overflow: hidden;
+            cursor: none;
+        }
+
+        .cursor {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            transition: transform 0.2s ease;
+        }
+
+        .particle {
+            position: fixed;
+            pointer-events: none;
+            width: 6px;
+            height: 6px;
+            background: #fff;
+            border-radius: 50%;
+            animation: fadeOut 1s ease-out forwards;
+        }
+
+        @keyframes fadeOut {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: scale(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="cursor"></div>
+
+    <script>
+        const cursor = document.querySelector('.cursor');
+        const body = document.body;
+
+        // Update cursor position
+        document.addEventListener('mousemove', (e) => {
+            cursor.style.left = e.clientX - 10 + 'px';
+            cursor.style.top = e.clientY - 10 + 'px';
+
+            // Create particles
+            createParticle(e.clientX, e.clientY);
+        });
+
+        // Create particle effect
+        function createParticle(x, y) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            particle.style.left = x + 'px';
+            particle.style.top = y + 'px';
+            
+            // Random color for particles
+            const colors = ['#ff0', '#0ff', '#f0f', '#fff'];
+            particle.style.background = colors[Math.floor(Math.random() * colors.length)];
+            
+            body.appendChild(particle);
+
+            // Remove particle after animation
+            setTimeout(() => {
+                particle.remove();
+            }, 1000);
+        }
+
+        // Add hover effect
+        document.addEventListener('mouseover', (e) => {
+            if (e.target.tagName !== 'BODY') {
+                cursor.style.transform = 'scale(1.5)';
+            }
+        });
+
+        document.addEventListener('mouseout', (e) => {
+            if (e.target.tagName !== 'BODY') {
+                cursor.style.transform = 'scale(1)';
+            }
+        });
+    </script>
+</body>
+</html> 
