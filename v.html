@@ -1,0 +1,762 @@
+<!-- Animated, drifting ember-like particles on a yellow background for the Merge Vehicle Game -->
+<style>
+body {
+  min-height: 100vh;
+  background: #ffe066; /* bright yellow */
+  background-attachment: fixed;
+  position: relative;
+  overflow: hidden;
+}
+body::before, body::after {
+  content: "";
+  display: none !important; /* Remove previous background overlays */
+}
+#bg-particles-canvas {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  display: block;
+}
+#merge-vehicle-game {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  /* Spruced up glassmorphism card */
+  background: rgb(213, 169, 10);
+  padding: 48px;
+  border-radius: 32px;
+  display: flex;
+  flex-direction: row;
+  gap: 40px;
+  box-shadow:
+    0 8px 32px #0003,
+    0 1.5px 0.5px #a5b4fc33,
+    0 0.5px 0.5px #fcd34d33;
+  min-width: 600px;
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1.5px solid #e0e7ff;
+  z-index: 1;
+}
+</style>
+<canvas id="bg-particles-canvas"></canvas>
+<div id="merge-vehicle-game">
+  <div style="flex: 0 0 auto;">
+    <h2 style="text-align:center; color:#333; margin-bottom:24px; font-family:inherit; letter-spacing:0.01em; text-shadow:0 2px 8px #a5b4fc22;">Merge Vehicle Game</h2>
+    <div id="car-grid" style="display: grid; grid-template-columns: repeat(4, 64px); grid-template-rows: repeat(4, 64px); gap: 12px;">
+      <!-- Car tiles will be rendered here -->
+    </div>
+    <div style="margin-top: 24px; text-align: center;">
+      <button id="buy-car" style="width: 140px; padding: 12px 0; font-size: 1.1rem; background: linear-gradient(90deg, #60a5fa 0%, #818cf8 100%); color: #fff; border: none; border-radius: 12px; cursor: pointer; box-shadow: 0 2px 8px #818cf822, 0 0.5px 0.5px #fcd34d33;">Buy Car<br><span id="car-cost" style="font-size:0.9em;">$10</span></button>
+      <span id="money" style="margin-left: 24px; font-size: 1.1rem; color: #333; background: #f8fafcbb; border-radius: 8px; padding: 4px 12px; box-shadow: 0 1px 4px #818cf822;">Money: $0</span>
+    </div>
+    <!-- Trash area -->
+    <div id="trash-area" style="margin-top: 28px; text-align: center;">
+      <div id="trash-drop"
+        style="display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; background: linear-gradient(135deg, #f87171 0%, #fca5a5 100%); border-radius: 16px; box-shadow: 0 2px 8px #f8717133, 0 0.5px 0.5px #fcd34d33; color: #fff; font-size: 2.2rem; cursor: pointer; border: 3px solid #b91c1c; transition: box-shadow 0.2s, background 0.2s;">
+        🗑️
+      </div>
+      <div style="font-size: 0.95em; color: #b91c1c; margin-top: 4px; text-shadow:0 1px 4px #fca5a555;">Trash</div>
+    </div>
+  </div>
+  <div id="road-section" style="flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; min-width: 180px;">
+    <h3 style="text-align:center; color:#333; margin-bottom:12px; font-family:inherit; letter-spacing:0.01em; text-shadow:0 2px 8px #a5b4fc22;">Road</h3>
+    <div id="road" style="width: 120px; height: 320px; background: linear-gradient(180deg, #818cf8 0%, #a5b4fc 60%, #f8fafc 100%); border-radius: 32px; position: relative; overflow: hidden; border: 4px solid #444; margin-bottom: 16px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; box-shadow: 0 2px 16px #818cf822;">
+      <!-- Car on road will be rendered here -->
+    </div>
+    <div style="font-size: 0.95em; color: #555; text-align: center; background: #f8fafcbb; border-radius: 8px; padding: 4px 12px; margin-top: 4px; box-shadow: 0 1px 4px #818cf822;">
+      <span>Drag a car here to earn money!</span>
+    </div>
+  </div>
+</div>
+<style>
+@keyframes car-shake {
+  0%   { transform: translateX(-50%) translateY(0); }
+  10%  { transform: translateX(-50%) translateY(-3px);}
+  18%  { transform: translateX(-50%) translateY(3px);}
+  30%  { transform: translateX(-50%) translateY(-3px);}
+  28%  { transform: translateX(-50%) translateY(3px);}
+  40%  { transform: translateX(-50%) translateY(-3px);}
+  46%  { transform: translateX(-50%) translateY(3px);}
+  18%  { transform: translateX(-50%) translateY(-3px);}
+  30%  { transform: translateX(-50%) translateY(3px);}
+  40%  { transform: translateX(-50%) translateY(-3px);}
+  50% { transform: translateX(-50%) translateY(0);}
+}
+.road-car-shake {
+  animation: car-shake 0.7s infinite cubic-bezier(.4,0,.2,1);
+  will-change: transform;
+}
+.road-car-line {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  height: 4px;
+  background: #222; /* changed from #888 to dark gray */
+  border-radius: 2px;
+  z-index: 0;
+  opacity: 0.7;
+  pointer-events: none;
+}
+#trash-drop {
+  transition: box-shadow 0.2s, background 0.2s;
+}
+#trash-drop.trash-hover {
+  box-shadow: 0 0 0 4px #f87171, 0 2px 8px #f8717133;
+  background: #b91c1c;
+}
+</style>
+<script>
+// --- PARTICLE BACKGROUND LOGIC (EMBER-LIKE) ---
+(function() {
+  const canvas = document.getElementById('bg-particles-canvas');
+  const ctx = canvas.getContext('2d');
+  let dpr = window.devicePixelRatio || 1;
+  let width = 0, height = 0;
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.scale(dpr, dpr);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // Ember particle config (red and orange)
+  const PARTICLE_COUNT = 64;
+  const COLORS = [
+    "#ff4500", // orange-red
+    "#ff9800", // orange
+    "#ffb300", // yellow-orange
+    "#ff6f00", // deep orange
+    "#ff5722", // vivid orange-red
+    "#ff7043", // light orange-red
+    "#ffab40"  // light orange
+  ];
+  const MIN_RADIUS = 1.2, MAX_RADIUS = 3.5;
+  const MIN_SPEED = 0.08, MAX_SPEED = 0.22;
+  const particles = [];
+
+  function randomAshShape() {
+    // Return a random number of points for a slightly irregular ellipse
+    const points = [];
+    const count = 8 + Math.floor(Math.random() * 4);
+    const r = 0.7 + Math.random() * 0.6;
+    for (let i = 0; i < count; ++i) {
+      const angle = (i / count) * 2 * Math.PI;
+      const rad = r + (Math.random() - 0.5) * 0.2;
+      points.push({x: Math.cos(angle) * rad, y: Math.sin(angle) * rad});
+    }
+    return points;
+  }
+
+  for (let i = 0; i < PARTICLE_COUNT; ++i) {
+    // Embers drift upward, with some horizontal meandering
+    const angle = -Math.PI/2 + (Math.random() - 0.5) * Math.PI/4; // mostly up
+    const speed = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED);
+    const radius = MIN_RADIUS + Math.random() * (MAX_RADIUS - MIN_RADIUS);
+    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const shape = randomAshShape();
+    particles.push({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: Math.cos(angle) * speed + (Math.random() - 0.5) * 0.04,
+      vy: Math.sin(angle) * speed + (Math.random() - 0.5) * 0.02,
+      r: radius,
+      color: color,
+      alpha: 0.18 + Math.random() * 0.22,
+      rotation: Math.random() * 2 * Math.PI,
+      rotationSpeed: (Math.random() - 0.5) * 0.008,
+      shape: shape,
+      drift: (Math.random() - 0.5) * 0.04
+    });
+  }
+
+  function animate() {
+    ctx.clearRect(0, 0, width, height);
+    for (let p of particles) {
+      // Move
+      p.x += p.vx + Math.sin(Date.now() * 0.0005 + p.y * 0.01) * p.drift;
+      p.y += p.vy;
+      p.rotation += p.rotationSpeed;
+
+      // Wrap around edges (top to bottom, like embers rising)
+      if (p.y < -p.r * 4) {
+        p.y = height + p.r * 4;
+        p.x = Math.random() * width;
+      }
+      if (p.x < -p.r * 4) p.x = width + p.r * 4;
+      if (p.x > width + p.r * 4) p.x = -p.r * 4;
+
+      // Draw
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.beginPath();
+      // Draw irregular ellipse/ember shape
+      const pts = p.shape;
+      ctx.moveTo(pts[0].x * p.r, pts[0].y * p.r);
+      for (let j = 1; j < pts.length; ++j) {
+        ctx.lineTo(pts[j].x * p.r, pts[j].y * p.r);
+      }
+      ctx.closePath();
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(animate);
+  }
+  animate();
+})();
+
+// --- GAME LOGIC ---
+const carRepresentations = [ // Renamed from carEmojis to be more general
+  "🛴", "🚲", "🛵", "🏍", "🛺", "🚗", "🚙", "🚕", "🚓", "🏎️",
+  "🚚", "truck.png", "🚜", "🚒", "🛻", "🚑", "🚐", "🚌", "🚎", "🚂", // Use image for Semi Truck (index 11)
+  "🚇", "🚊", "🚆", "⛵️", "🚤", "🛥", "⛴", "🛳", "🚢", "🛫",
+  "🛩", "🚁", "🛰", "🚀", "🛸"
+];
+// All car names, one for each representation above:
+const carNames = [
+  "Kick Scooter",
+  "Bicycle",
+  "Moped",
+  "Motorcycle",
+  "Auto Rickshaw",
+  "Compact Car",
+  "SUV",
+  "Taxi",
+  "Police Car",
+  "Race Car",
+  "Van",
+  "Semi Truck", // Name for index 11
+  "Tractor",
+  "Fire Truck",
+  "Pickup Truck",
+  "Ambulance",
+  "Minibus",
+  "Bus",
+  "Trolleybus",
+  "Steam Train",
+  "Subway",
+  "Tram",
+  "High-Speed Train",
+  "Sailboat",
+  "Speedboat",
+  "Yacht",
+  "Ferry",
+  "Cruise Ship",
+  "Cargo Ship",
+  "Airplane",
+  "Small Plane",
+  "Helicopter",
+  "Satellite",
+  "Rocket",
+  "UFO"
+];
+// Ensure carBaseIncome has enough entries if carRepresentations is extended
+const carBaseIncome = [
+   1,    4,   12,    30,     80,      200,  500,   1200,    3000,   10000, // Scooter to Race Car
+ 250,  600,  150,   400,    350,     550,  300,    700,     800,    1500, // Van to Steam Train
+2000, 1800, 2500,   100,    150,     400,  600,    1000,    1200,    5000, // Subway to Airplane
+4000, 3000, 8000, 10000, 100000 // Small Plane to UFO
+];
+// Ensure carNames has a corresponding name for every entry in carRepresentations
+if (carRepresentations.length !== carNames.length) {
+  console.error("Mismatch between carRepresentations and carNames arrays!");
+}
+if (carRepresentations.length > carBaseIncome.length) {
+    console.warn("carBaseIncome might be missing entries for higher level vehicles.");
+    // Optionally fill missing income values, e.g., based on the previous one
+    for (let k = carBaseIncome.length; k < carRepresentations.length; k++) {
+        carBaseIncome.push(carBaseIncome[k-1] * 2.5); // Example progression
+    }
+}
+
+
+const gridSize = 4;
+let grid = Array(gridSize * gridSize).fill(null);
+let money = 20;
+let carCost = 10;
+let carBuyCount = 0; // Track how many cars have been bought
+let roadCars = [null, null, null]; // Array of up to 3 cars on the road
+let roadInterval = null;
+
+// --- RENDERING ---
+
+// This is the base renderGrid function, it will be patched later
+function renderGrid() {
+  const gridDiv = document.getElementById('car-grid');
+  gridDiv.innerHTML = '';
+  grid.forEach((car, i) => {
+    const tile = document.createElement('div');
+    tile.style.width = '64px';
+    tile.style.height = '64px';
+    tile.style.background = car !== null ? '#fff' : '#bbb';
+    tile.style.borderRadius = '8px';
+    tile.style.display = 'flex';
+    tile.style.alignItems = 'center';
+    tile.style.justifyContent = 'center';
+    // Font size is set below based on content type
+    tile.style.cursor = car !== null ? 'grab' : 'default';
+    tile.style.position = 'relative';
+    tile.dataset.index = i;
+
+    if (car !== null) {
+      const representation = carRepresentations[car];
+      if (typeof representation === 'string' && representation.endsWith('.png')) {
+        // Display image
+        const img = document.createElement('img');
+        img.src = representation;
+        img.alt = carNames[car];
+        img.style.width = '48px'; // Adjust size as needed
+        img.style.height = '48px';
+        img.style.objectFit = 'contain';
+        img.style.userSelect = 'none'; // Prevent image selection during drag
+        img.setAttribute('draggable', 'false'); // Prevent image ghost drag
+        tile.appendChild(img);
+        tile.style.fontSize = ''; // Clear font size if image
+      } else {
+        // Display emoji
+        tile.textContent = representation;
+        tile.style.fontSize = '2rem'; // Keep font size for emoji
+      }
+      tile.title = carNames[car];
+      tile.setAttribute('draggable', 'true');
+      tile.ondragstart = (e) => {
+        e.dataTransfer.setData('text/plain', i);
+        setTimeout(() => { tile.style.opacity = '0.5'; }, 0);
+      };
+      tile.ondragend = (e) => {
+        tile.style.opacity = '';
+      };
+      // Trash button removed
+    } else {
+      tile.setAttribute('draggable', 'false');
+    }
+    // Allow drop on all tiles
+    tile.ondragover = (e) => {
+      e.preventDefault();
+      // Highlight if valid move or merge
+      const fromIndex = parseInt(e.dataTransfer?.getData('text/plain'), 10);
+      if (
+        grid[i] === null || // empty: allow move
+        (grid[fromIndex] !== null && grid[i] !== null && grid[fromIndex] === grid[i] && grid[i] < carRepresentations.length - 1) // merge
+      ) {
+        tile.style.boxShadow = '0 0 0 4px #2196f3';
+      }
+    };
+    tile.ondragleave = (e) => {
+      tile.style.boxShadow = '';
+    };
+    tile.ondrop = (e) => {
+      e.preventDefault();
+      tile.style.boxShadow = '';
+      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const toIndex = i;
+      if (fromIndex === toIndex) return;
+      // If dropping onto empty, move the car
+      if (grid[fromIndex] !== null && grid[toIndex] === null) {
+        grid[toIndex] = grid[fromIndex];
+        grid[fromIndex] = null;
+        renderGrid(); // Call the (potentially patched) renderGrid
+        return;
+      }
+      // If dropping onto same car, merge
+      if (
+        grid[fromIndex] !== null &&
+        grid[toIndex] !== null &&
+        grid[fromIndex] === grid[toIndex] &&
+        grid[toIndex] < carRepresentations.length - 1
+      ) {
+        grid[toIndex] += 1;
+        grid[fromIndex] = null;
+        // No money for merging, only for road
+        renderGrid(); // Call the (potentially patched) renderGrid
+      }
+    };
+    // Allow drag to road
+    tile.ondragend = (e) => { // This might be redundant with the one inside if(car !== null)
+      tile.style.opacity = '';
+    };
+    tile.ondragstart = (e) => { // This might be redundant with the one inside if(car !== null)
+      e.dataTransfer.setData('text/plain', i);
+      e.dataTransfer.effectAllowed = "move";
+      setTimeout(() => { tile.style.opacity = '0.5'; }, 0);
+    };
+    gridDiv.appendChild(tile);
+  });
+}
+
+// --- ROAD LOGIC ---
+
+function renderRoad() {
+  const roadDiv = document.getElementById('road');
+  roadDiv.innerHTML = '';
+
+  // Layout: 3 slots vertically spaced
+  for (let slot = 0; slot < 3; slot++) {
+    const slotDiv = document.createElement('div');
+    slotDiv.className = 'road-slot';
+    slotDiv.style.width = '100%';
+    slotDiv.style.height = '33.33%';
+    slotDiv.style.position = 'relative';
+    slotDiv.style.display = 'flex';
+    slotDiv.style.alignItems = 'center';
+    slotDiv.style.justifyContent = 'center';
+
+    // Highlight slot on dragover if empty
+    slotDiv.ondragover = (e) => {
+      e.preventDefault();
+      if (roadCars[slot] === null) {
+        slotDiv.style.boxShadow = '0 0 0 4px #2196f3';
+      }
+    };
+    slotDiv.ondragleave = (e) => {
+      slotDiv.style.boxShadow = '';
+    };
+    slotDiv.ondrop = (e) => {
+      e.preventDefault();
+      slotDiv.style.boxShadow = '';
+      if (roadCars[slot] !== null) return;
+      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      if (!isNaN(fromIndex) && grid[fromIndex] !== null) { // Check fromIndex is valid
+        roadCars[slot] = {car: grid[fromIndex]};
+        grid[fromIndex] = null;
+        renderGrid(); // Call the (potentially patched) renderGrid
+        renderRoad();
+      }
+    };
+
+    if (roadCars[slot] !== null) {
+      const carIndex = roadCars[slot].car;
+      const representation = carRepresentations[carIndex];
+
+      // Car display container
+      const carDiv = document.createElement('div');
+      carDiv.style.width = '64px'; // Container width
+      carDiv.style.height = '64px'; // Container height
+      carDiv.style.margin = '0 auto';
+      carDiv.style.display = 'flex';
+      carDiv.style.alignItems = 'center';
+      carDiv.style.justifyContent = 'center';
+      carDiv.style.position = 'absolute';
+      carDiv.style.left = '50%';
+      carDiv.style.bottom = '24px';
+      carDiv.style.transform = 'translateX(-50%)';
+      // Font size set below based on content type
+
+      if (typeof representation === 'string' && representation.endsWith('.png')) {
+        // Display image
+        const img = document.createElement('img');
+        img.src = representation;
+        img.alt = carNames[carIndex];
+        img.style.width = '56px'; // Adjust size as needed for road
+        img.style.height = '56px';
+        img.style.objectFit = 'contain';
+        img.style.userSelect = 'none';
+        img.setAttribute('draggable', 'false');
+        carDiv.appendChild(img);
+        carDiv.style.fontSize = ''; // Clear font size if image
+      } else {
+        // Display emoji
+        carDiv.textContent = representation;
+        carDiv.style.fontSize = '2.5rem'; // Keep font size for emoji
+      }
+
+      carDiv.title = carNames[carIndex];
+      carDiv.classList.add('road-car-shake');
+      // Add a phase offset for each slot so they don't shake in sync
+      carDiv.style.animationDelay = (slot * 0.05) + 's';
+      slotDiv.appendChild(carDiv);
+
+      // Add dark gray line under the car, a little further up
+      const lineDiv = document.createElement('div');
+      lineDiv.className = 'road-car-line';
+      // Move the line further up: set its bottom to 36px instead of 24px
+      lineDiv.style.bottom = '36px';
+      slotDiv.appendChild(lineDiv);
+
+      // Show earning rate
+      const earnDiv = document.createElement('div');
+      earnDiv.style.position = 'absolute';
+      earnDiv.style.left = '50%';
+      earnDiv.style.bottom = '0';
+      earnDiv.style.transform = 'translateX(-50%)';
+      earnDiv.style.fontSize = '1em';
+      earnDiv.style.color = '#222';
+      earnDiv.style.background = '#fff8';
+      earnDiv.style.borderRadius = '8px';
+      earnDiv.style.padding = '2px 8px';
+      // Make sure income exists for this car index
+      const income = carBaseIncome[carIndex] !== undefined ? carBaseIncome[carIndex] : 0;
+      earnDiv.textContent = `+$${income}/s`;
+      slotDiv.appendChild(earnDiv);
+
+      // Add remove button
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = "Remove";
+      removeBtn.style.position = 'absolute';
+      removeBtn.style.top = '8px';
+      removeBtn.style.right = '8px';
+      removeBtn.style.fontSize = '0.9em';
+      removeBtn.style.padding = '2px 8px';
+      removeBtn.style.background = '#f87171';
+      removeBtn.style.color = '#fff';
+      removeBtn.style.border = 'none';
+      removeBtn.style.borderRadius = '6px';
+      removeBtn.style.cursor = 'pointer';
+      removeBtn.onclick = () => {
+        // Put car back to grid if space
+        let empty = grid.findIndex(v => v === null);
+        if (empty !== -1) {
+          grid[empty] = roadCars[slot].car;
+          roadCars[slot] = null;
+          renderGrid(); // Call the (potentially patched) renderGrid
+          renderRoad();
+        }
+      };
+      slotDiv.appendChild(removeBtn);
+    } else {
+      // Optionally, show a faint slot indicator
+      // slotDiv.style.background = 'rgba(255,255,255,0.05)';
+    }
+
+    roadDiv.appendChild(slotDiv);
+  }
+}
+
+// Allow dropping car from grid to road (on the whole road area, highlight all empty slots)
+const roadDiv = document.getElementById('road');
+roadDiv.ondragover = (e) => {
+  e.preventDefault();
+  // Highlight all empty slots
+  // (handled per-slot in renderRoad)
+};
+roadDiv.ondragleave = (e) => {
+  // (handled per-slot in renderRoad)
+};
+roadDiv.ondrop = (e) => {
+  // Do nothing here, handled per-slot
+};
+
+// --- TRASH LOGIC ---
+
+const trashDrop = document.getElementById('trash-drop');
+if (trashDrop) {
+  trashDrop.ondragover = (e) => {
+    e.preventDefault();
+    trashDrop.classList.add('trash-hover');
+  };
+  trashDrop.ondragleave = (e) => {
+    trashDrop.classList.remove('trash-hover');
+  };
+  trashDrop.ondrop = (e) => {
+    e.preventDefault();
+    trashDrop.classList.remove('trash-hover');
+    const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (!isNaN(fromIndex) && grid[fromIndex] !== null) {
+      grid[fromIndex] = null;
+      renderGrid(); // Call the (potentially patched) renderGrid
+    }
+  };
+}
+
+// --- MONEY LOGIC ---
+
+function updateMoneyDisplay() {
+  document.getElementById('money').textContent = "Money: $" + Math.floor(money);
+  document.getElementById('car-cost').textContent = `$${carCost}`;
+}
+
+// Passive income from cars on road
+function startRoadEarning() {
+  if (roadInterval) clearInterval(roadInterval);
+  roadInterval = setInterval(() => {
+    for (let i = 0; i < roadCars.length; i++) {
+      if (roadCars[i] !== null) {
+        const carIndex = roadCars[i].car;
+        // Make sure income exists for this car index
+        const income = carBaseIncome[carIndex] !== undefined ? carBaseIncome[carIndex] : 0;
+        // If 60 or more cars have been bought, double the income per car
+        if (carBuyCount >= 60) {
+          money += income * 2;
+        } else {
+          money += income;
+        }
+      }
+    }
+    updateMoneyDisplay();
+  }, 1000);
+}
+startRoadEarning();
+
+// --- BUY CAR LOGIC ---
+
+function getNextCarCost() {
+  // Cost increases by 1 every time you buy a car
+  return carCost + 1;
+}
+
+// --- MODIFIED BUY CAR LOGIC ---
+// When you make your first compact car (by merging two bicycles), from then on, buying a car gives you a bicycle instead of a kick scooter.
+
+let unlockedBicycle = false; // If true, buyCar gives bicycle (1) instead of kick scooter (0)
+
+function buyCar() {
+  // Find empty slot
+  let empty = grid.findIndex(v => v === null);
+  if (empty === -1) return;
+  if (money < carCost) return;
+  money -= carCost;
+  // If unlockedBicycle, buy bicycle (1), else buy kick scooter (0)
+  grid[empty] = unlockedBicycle ? 1 : 0;
+  carCost = getNextCarCost();
+  carBuyCount++; // Increment the number of cars bought
+  updateMoneyDisplay();
+  renderGrid(); // Call the (potentially patched) renderGrid
+}
+
+// Patch merge logic to unlock bicycle after first compact car is made
+// (compact car is car index 5)
+// We'll patch the merge logic in renderGrid's .ondrop handler:
+const originalRenderGrid = renderGrid; // Keep a reference to the base renderGrid with image support
+renderGrid = function() { // Redefine renderGrid to include the patch logic
+  const gridDiv = document.getElementById('car-grid');
+  gridDiv.innerHTML = '';
+  grid.forEach((car, i) => {
+    const tile = document.createElement('div');
+    tile.style.width = '64px';
+    tile.style.height = '64px';
+    tile.style.background = car !== null ? '#fff' : '#bbb';
+    tile.style.borderRadius = '8px';
+    tile.style.display = 'flex';
+    tile.style.alignItems = 'center';
+    tile.style.justifyContent = 'center';
+    // Font size set below based on content type
+    tile.style.cursor = car !== null ? 'grab' : 'default';
+    tile.style.position = 'relative';
+    tile.dataset.index = i;
+
+    if (car !== null) {
+      const representation = carRepresentations[car];
+      if (typeof representation === 'string' && representation.endsWith('.png')) {
+        // Display image (same as in base renderGrid)
+        const img = document.createElement('img');
+        img.src = representation;
+        img.alt = carNames[car];
+        img.style.width = '48px';
+        img.style.height = '48px';
+        img.style.objectFit = 'contain';
+        img.style.userSelect = 'none';
+        img.setAttribute('draggable', 'false');
+        tile.appendChild(img);
+        tile.style.fontSize = '';
+      } else {
+        // Display emoji (same as in base renderGrid)
+        tile.textContent = representation;
+        tile.style.fontSize = '2rem';
+      }
+      tile.title = carNames[car];
+      tile.setAttribute('draggable', 'true');
+      tile.ondragstart = (e) => {
+        e.dataTransfer.setData('text/plain', i);
+        setTimeout(() => { tile.style.opacity = '0.5'; }, 0);
+      };
+      tile.ondragend = (e) => {
+        tile.style.opacity = '';
+      };
+    } else {
+      tile.setAttribute('draggable', 'false');
+    }
+
+    // Drop handlers (incorporating the patch logic)
+    tile.ondragover = (e) => {
+      e.preventDefault();
+      const fromIndex = parseInt(e.dataTransfer?.getData('text/plain'), 10);
+      if (
+        grid[i] === null ||
+        (grid[fromIndex] !== null && grid[i] !== null && grid[fromIndex] === grid[i] && grid[i] < carRepresentations.length - 1)
+      ) {
+        tile.style.boxShadow = '0 0 0 4px #2196f3';
+      }
+    };
+    tile.ondragleave = (e) => {
+      tile.style.boxShadow = '';
+    };
+    tile.ondrop = (e) => {
+      e.preventDefault();
+      tile.style.boxShadow = '';
+      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const toIndex = i;
+      if (isNaN(fromIndex) || fromIndex === toIndex) return; // Check fromIndex validity
+
+      // Move logic
+      if (grid[fromIndex] !== null && grid[toIndex] === null) {
+        grid[toIndex] = grid[fromIndex];
+        grid[fromIndex] = null;
+        renderGrid(); // Call the patched renderGrid recursively
+        return;
+      }
+
+      // Merge logic (with patch)
+      if (
+        grid[fromIndex] !== null &&
+        grid[toIndex] !== null &&
+        grid[fromIndex] === grid[toIndex] &&
+        grid[toIndex] < carRepresentations.length - 1
+      ) {
+        grid[toIndex] += 1;
+        // --- PATCHED PART ---
+        // If the merge result is a compact car (index 5), unlock bicycle for buying
+        if (grid[toIndex] === 5 && !unlockedBicycle) { // Only unlock once
+          console.log("Unlocked Bicycle buying!");
+          unlockedBicycle = true;
+        }
+        // --- END PATCHED PART ---
+        grid[fromIndex] = null;
+        renderGrid(); // Call the patched renderGrid recursively
+      }
+    };
+    // Drag handlers (redundant, already inside if(car !== null), but keep for safety)
+    tile.ondragend = (e) => {
+      tile.style.opacity = '';
+    };
+    tile.ondragstart = (e) => {
+      if (car !== null) { // Only allow dragging actual cars
+          e.dataTransfer.setData('text/plain', i);
+          e.dataTransfer.effectAllowed = "move";
+          setTimeout(() => { tile.style.opacity = '0.5'; }, 0);
+      } else {
+          e.preventDefault(); // Prevent dragging empty tiles
+      }
+    };
+    gridDiv.appendChild(tile);
+  });
+}; // End of patched renderGrid definition
+
+document.getElementById('buy-car').onclick = buyCar;
+
+// --- INITIALIZE ---
+
+function initialRender() {
+  renderGrid(); // Calls the final, patched version of renderGrid
+  renderRoad();
+  updateMoneyDisplay();
+}
+initialRender();
+</script>
