@@ -1,0 +1,271 @@
+<style>
+  .color-palette {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 10px;
+    max-width: 400px;
+    z-index: 10000; /* Ensure palette is above drawing paths */
+  }
+  
+  .color-option {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid white;
+    transition: transform 0.2s;
+  }
+  
+  .color-option:hover {
+    transform: scale(1.1);
+  }
+
+  .cursor-circle {
+    position: fixed;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    transition: left 0.05s, top 0.05s;
+  }
+
+  .drawing-path {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9998;
+  }
+
+  /* Add this new style */
+  .color-palette * {
+    pointer-events: auto;
+  }
+
+  .size-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: white;
+    margin-bottom: 10px;
+  }
+
+  .size-slider {
+    width: 150px;
+    height: 5px;
+    -webkit-appearance: none;
+    background: #ddd;
+    border-radius: 5px;
+    outline: none;
+  }
+
+  .size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .size-slider::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+  }
+
+  .colors-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+  }
+
+  .eraser {
+    background: white !important;
+    position: relative;
+  }
+
+  .eraser::after {
+    content: '×';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #333;
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .color-option.active {
+    transform: scale(1.2);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  }
+</style>
+
+<div class="color-palette">
+  <div class="size-control">
+    <span>Size:</span>
+    <input type="range" class="size-slider" min="5" max="50" value="20" id="sizeSlider">
+    <span id="sizeValue">20px</span>
+  </div>
+  <div class="colors-container">
+    <div class="color-option eraser" onclick="toggleEraser()"></div>
+    <div class="color-option" style="background: #FF0000;" onclick="changeColor('#FF0000')"></div>
+    <div class="color-option" style="background: #00FF00;" onclick="changeColor('#00FF00')"></div>
+    <div class="color-option" style="background: #0000FF;" onclick="changeColor('#0000FF')"></div>
+    <div class="color-option" style="background: #FFFF00;" onclick="changeColor('#FFFF00')"></div>
+    <div class="color-option" style="background: #FF00FF;" onclick="changeColor('#FF00FF')"></div>
+    <div class="color-option" style="background: #00FFFF;" onclick="changeColor('#00FFFF')"></div>
+    <div class="color-option" style="background: #FFA500;" onclick="changeColor('#FFA500')"></div>
+    <div class="color-option" style="background: #800080;" onclick="changeColor('#800080')"></div>
+    <div class="color-option" style="background: #008000;" onclick="changeColor('#008000')"></div>
+    <div class="color-option" style="background: #FFC0CB;" onclick="changeColor('#FFC0CB')"></div>
+    <div class="color-option" style="background: #A52A2A;" onclick="changeColor('#A52A2A')"></div>
+    <div class="color-option" style="background: #808080;" onclick="changeColor('#808080')"></div>
+    <div class="color-option" style="background: #000000;" onclick="changeColor('#000000')"></div>
+    <div class="color-option" style="background: #4B0082;" onclick="changeColor('#4B0082')"></div>
+    <div class="color-option" style="background: #FFD700;" onclick="changeColor('#FFD700')"></div>
+    <div class="color-option" style="background: #9B59B6;" onclick="changeColor('#9B59B6')"></div>
+    <div class="color-option" style="background: #1ABC9C;" onclick="changeColor('#1ABC9C')"></div>
+  </div>
+</div>
+
+<script>
+  let currentColor = '#FF0000';
+  let currentSize = 20;
+  let cursorCircle = null;
+  let isDrawing = false;
+  let currentPath = null;
+  let pathPoints = [];
+  let isEraser = false;
+
+  const sizeSlider = document.getElementById('sizeSlider');
+  const sizeValue = document.getElementById('sizeValue');
+
+  sizeSlider.addEventListener('mousedown', (e) => {
+    e.stopPropagation(); // Prevent drawing from starting
+    isDrawing = false;
+  });
+
+  sizeSlider.addEventListener('input', (e) => {
+    currentSize = parseInt(e.target.value);
+    sizeValue.textContent = currentSize + 'px';
+    if (cursorCircle) {
+      cursorCircle.style.width = currentSize + 'px';
+      cursorCircle.style.height = currentSize + 'px';
+    }
+  });
+
+  sizeSlider.addEventListener('mouseup', (e) => {
+    e.stopPropagation(); // Prevent drawing from starting
+  });
+
+  function toggleEraser() {
+    isEraser = !isEraser;
+    const eraser = document.querySelector('.eraser');
+    if (isEraser) {
+      eraser.classList.add('active');
+      if (cursorCircle) {
+        cursorCircle.style.backgroundColor = 'white';
+      }
+    } else {
+      eraser.classList.remove('active');
+      if (cursorCircle) {
+        cursorCircle.style.backgroundColor = currentColor;
+      }
+    }
+  }
+
+  function changeColor(color) {
+    isEraser = false;
+    currentColor = color;
+    document.querySelector('.eraser').classList.remove('active');
+    if (!cursorCircle) {
+      cursorCircle = document.createElement('div');
+      cursorCircle.className = 'cursor-circle';
+      cursorCircle.style.width = currentSize + 'px';
+      cursorCircle.style.height = currentSize + 'px';
+      document.body.appendChild(cursorCircle);
+    }
+    cursorCircle.style.backgroundColor = color;
+  }
+
+  function startNewPath() {
+    currentPath = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    currentPath.className = 'drawing-path';
+    currentPath.style.position = 'fixed';
+    currentPath.style.top = '0';
+    currentPath.style.left = '0';
+    currentPath.style.width = '100%';
+    currentPath.style.height = '100%';
+    document.body.appendChild(currentPath);
+    pathPoints = [];
+  }
+
+  function updatePath(x, y) {
+    pathPoints.push([x, y]);
+    
+    // If we only have one point, draw a circle
+    if (pathPoints.length === 1) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', x);
+      circle.setAttribute('cy', y);
+      circle.setAttribute('r', currentSize / 2);
+      circle.setAttribute('fill', isEraser ? 'white' : currentColor);
+      currentPath.appendChild(circle);
+      return;
+    }
+
+    // Otherwise draw the path as normal
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    let d = `M ${pathPoints[0][0]} ${pathPoints[0][1]}`;
+    for (let i = 1; i < pathPoints.length; i++) {
+      d += ` L ${pathPoints[i][0]} ${pathPoints[i][1]}`;
+    }
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', isEraser ? 'white' : currentColor);
+    path.setAttribute('stroke-width', currentSize);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+
+    // Clear previous paths and add the new one
+    currentPath.innerHTML = '';
+    currentPath.appendChild(path);
+  }
+
+  document.addEventListener('mousemove', (e) => {
+    if (cursorCircle) {
+      cursorCircle.style.left = e.clientX + 'px';
+      cursorCircle.style.top = e.clientY + 'px';
+    }
+    if (isDrawing) {
+      updatePath(e.clientX, e.clientY);
+    }
+  });
+
+  document.addEventListener('mousedown', (e) => {
+    isDrawing = true;
+    startNewPath();
+    updatePath(e.clientX, e.clientY);
+  });
+
+  document.addEventListener('mouseup', () => {
+    isDrawing = false;
+  });
+
+  // Initialize with red color
+  changeColor('#FF0000');
+</script>

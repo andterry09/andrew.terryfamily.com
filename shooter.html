@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Movable Circles on Ice</title>
+  <style>
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #222;
+    }
+    body {
+      width: 100vw;
+      height: 100vh;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+      background: #333;
+      width: 100vw;
+      height: 100vh;
+    }
+    #colorScreen {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #222e;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #fff;
+      font-size: 1.3em;
+      letter-spacing: 1px;
+      user-select: none;
+    }
+    .color-options {
+      display: flex;
+      gap: 32px;
+      margin: 32px 0 24px 0;
+    }
+    .color-circle {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      border: 4px solid #fff8;
+      box-shadow: 0 2px 16px #000a;
+      cursor: pointer;
+      transition: border 0.2s, box-shadow 0.2s;
+      outline: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .color-circle.selected {
+      border: 4px solid #fff;
+      box-shadow: 0 0 0 4px #fff4, 0 2px 16px #000a;
+    }
+    .color-label {
+      margin-top: 8px;
+      text-align: center;
+      font-size: 0.95em;
+      color: #fff;
+      text-shadow: 0 1px 4px #000a;
+    }
+    #pressSpace {
+      margin-top: 18px;
+      font-size: 1.1em;
+      color: #fff;
+      opacity: 0.85;
+      letter-spacing: 1px;
+      text-shadow: 0 1px 4px #000a;
+      animation: blink 1.2s infinite alternate;
+    }
+    #tagButton {
+      margin-top: 24px;
+      padding: 10px 28px;
+      font-size: 1.1em;
+      background: #444;
+      color: #fff;
+      border: 2px solid #fff8;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s, border 0.2s;
+      box-shadow: 0 2px 12px #0006;
+      font-family: inherit;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+    #tagButton:hover, #tagButton:focus {
+      background: #666;
+      border: 2px solid #fff;
+      outline: none;
+    }
+    #tagNotice {
+      margin-top: 10px;
+      font-size: 1.1em;
+      color: #ff8;
+      text-shadow: 0 1px 4px #000a;
+      font-weight: bold;
+      display: none;
+    }
+    @keyframes blink {
+      from { opacity: 0.85; }
+      to { opacity: 0.35; }
+    }
+  </style>
+</head>
+<body>
+  <div id="colorScreen">
+    <div style="font-size:2em; font-weight:bold; margin-bottom:10px;">Pick Your Color</div>
+    <div style="font-size:1.1em; margin-bottom:10px;">Player 1 (Arrow Keys):</div>
+    <div class="color-options" id="p1Colors"></div>
+    <div style="font-size:1.1em; margin-bottom:10px;">Player 2 (WASD):</div>
+    <div class="color-options" id="p2Colors"></div>
+    <button id="tagButton" type="button">Switch to Tag Mode</button>
+    <div id="tagNotice">Tag Mode: One player is "it" and must tag the other!</div>
+    <div id="pressSpace">Press SPACE to start</div>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Set canvas to fill the window
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // --- Color selection screen logic ---
+    const colorScreen = document.getElementById('colorScreen');
+    const p1ColorsDiv = document.getElementById('p1Colors');
+    const p2ColorsDiv = document.getElementById('p2Colors');
+    const tagButton = document.getElementById('tagButton');
+    const tagNotice = document.getElementById('tagNotice');
+    const colorChoices = [
+      { name: "Blue", color: "#4af" },
+      { name: "Red", color: "#f44" },
+      { name: "Green", color: "#3f4" },
+      { name: "Yellow", color: "#ff4" },
+      { name: "Purple", color: "#a4f" },
+      { name: "Orange", color: "#fa4" }
+    ];
+
+    // Default: P1 blue, P2 green
+    let p1ColorIdx = 0;
+    let p2ColorIdx = 2;
+
+    // Tag mode state
+    let tagMode = false;
+    let itPlayer = 1; // 1 or 2
+
+    // New: Track if someone has won (tagged)
+    let tagWinner = null; // 1 or 2 if someone has won, null otherwise
+
+    tagButton.addEventListener('click', () => {
+      tagMode = !tagMode;
+      if (tagMode) {
+        tagButton.textContent = "Switch to Normal Mode";
+        tagNotice.style.display = "block";
+        // Randomly pick who is "it"
+        itPlayer = Math.random() < 0.5 ? 1 : 2;
+        tagWinner = null; // Reset winner if switching back to tag mode
+      } else {
+        tagButton.textContent = "Switch to Tag Mode";
+        tagNotice.style.display = "none";
+        tagWinner = null;
+      }
+    });
+
+    function renderColorOptions(div, selectedIdx, onPick) {
+      div.innerHTML = '';
+      colorChoices.forEach((choice, idx) => {
+        const c = document.createElement('div');
+        c.className = 'color-circle' + (idx === selectedIdx ? ' selected' : '');
+        c.style.background = choice.color;
+        c.tabIndex = 0;
+        c.title = choice.name;
+        c.addEventListener('click', () => onPick(idx));
+        c.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            onPick(idx);
+            e.preventDefault();
+          }
+        });
+        c.innerHTML = '';
+        div.appendChild(c);
+      });
+    }
+
+    function updateColorScreen() {
+      renderColorOptions(p1ColorsDiv, p1ColorIdx, (idx) => {
+        if (idx !== p2ColorIdx) p1ColorIdx = idx;
+        else {
+          // Prevent both players picking same color
+          p1ColorIdx = idx;
+          if (p2ColorIdx === idx) {
+            p2ColorIdx = (idx + 1) % colorChoices.length;
+          }
+        }
+        updateColorScreen();
+      });
+      renderColorOptions(p2ColorsDiv, p2ColorIdx, (idx) => {
+        if (idx !== p1ColorIdx) p2ColorIdx = idx;
+        else {
+          p2ColorIdx = idx;
+          if (p1ColorIdx === idx) {
+            p1ColorIdx = (idx + 1) % colorChoices.length;
+          }
+        }
+        updateColorScreen();
+      });
+    }
+    updateColorScreen();
+
+    // Allow keyboard navigation for color selection
+    p1ColorsDiv.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'd') {
+        p1ColorIdx = (p1ColorIdx + 1) % colorChoices.length;
+        if (p1ColorIdx === p2ColorIdx) p1ColorIdx = (p1ColorIdx + 1) % colorChoices.length;
+        updateColorScreen();
+        e.preventDefault();
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'a') {
+        p1ColorIdx = (p1ColorIdx - 1 + colorChoices.length) % colorChoices.length;
+        if (p1ColorIdx === p2ColorIdx) p1ColorIdx = (p1ColorIdx - 1 + colorChoices.length) % colorChoices.length;
+        updateColorScreen();
+        e.preventDefault();
+      }
+    });
+    p2ColorsDiv.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'd') {
+        p2ColorIdx = (p2ColorIdx + 1) % colorChoices.length;
+        if (p2ColorIdx === p1ColorIdx) p2ColorIdx = (p2ColorIdx + 1) % colorChoices.length;
+        updateColorScreen();
+        e.preventDefault();
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'a') {
+        p2ColorIdx = (p2ColorIdx - 1 + colorChoices.length) % colorChoices.length;
+        if (p2ColorIdx === p1ColorIdx) p2ColorIdx = (p2ColorIdx - 1 + colorChoices.length) % colorChoices.length;
+        updateColorScreen();
+        e.preventDefault();
+      }
+    });
+
+    // Wait for space to start
+    let gameStarted = false;
+    function tryStartGame(e) {
+      if (!gameStarted && (e.code === 'Space' || e.key === ' ')) {
+        gameStarted = true;
+        colorScreen.style.display = 'none';
+        document.removeEventListener('keydown', tryStartGame);
+        // Now start the game loop
+        gameLoop();
+      }
+    }
+    document.addEventListener('keydown', tryStartGame);
+
+    // --- Game logic ---
+    // Circle 1 (arrow keys)
+    let x1 = canvas.width / 2;
+    let y1 = canvas.height / 2;
+    let vx1 = 0, vy1 = 0;
+
+    // Circle 2 (wasd)
+    let x2 = canvas.width / 3;
+    let y2 = canvas.height / 3;
+    let vx2 = 0, vy2 = 0;
+
+    const radius = 40;
+
+    // Movement constants (same for both)
+    const accel = 0.4;
+    const maxSpeed = 7;
+    const friction = 0.985;
+
+    // Track which keys are pressed
+    const keys = {
+      ArrowUp: false,
+      ArrowDown: false,
+      ArrowLeft: false,
+      ArrowRight: false,
+      w: false,
+      a: false,
+      s: false,
+      d: false
+    };
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key in keys) {
+        keys[e.key] = true;
+        e.preventDefault();
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.key in keys) {
+        keys[e.key] = false;
+        e.preventDefault();
+      }
+    });
+
+    // Tag mode variables
+    let tagCooldown = 0;
+    let tagMessage = "";
+    let tagMessageTimer = 0;
+
+    function handleCircleCollision() {
+      // Calculate distance between centers
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < radius * 2 && dist > 0) {
+        // Overlap detected, resolve collision
+
+        // Minimum translation distance to push circles apart
+        const overlap = radius * 2 - dist;
+
+        // Normalize direction
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        // Push circles apart equally, but only up to the minimum required to separate
+        const separation = overlap / 2 + 0.1;
+        x1 -= nx * separation;
+        y1 -= ny * separation;
+        x2 += nx * separation;
+        y2 += ny * separation;
+
+        // Calculate relative velocity
+        const dvx = vx2 - vx1;
+        const dvy = vy2 - vy1;
+
+        // Calculate velocity along the normal
+        const vn = dvx * nx + dvy * ny;
+
+        if (vn < 0) { // Only resolve if moving towards each other
+          // Elastic collision (equal mass)
+          // Project velocities onto normal and tangent
+          // Normal
+          const v1n = vx1 * nx + vy1 * ny;
+          const v2n = vx2 * nx + vy2 * ny;
+          // Tangent
+          const tx = -ny;
+          const ty = nx;
+          const v1t = vx1 * tx + vy1 * ty;
+          const v2t = vx2 * tx + vy2 * ty;
+
+          // Swap normal components
+          const v1nAfter = v2n;
+          const v2nAfter = v1n;
+
+          // Recompose velocities
+          vx1 = v1nAfter * nx + v1t * tx;
+          vy1 = v1nAfter * ny + v1t * ty;
+          vx2 = v2nAfter * nx + v2t * tx;
+          vy2 = v2nAfter * ny + v2t * ty;
+
+          // Dampen a bit for "ice" effect, but less than before for stability
+          vx1 *= 0.85;
+          vy1 *= 0.85;
+          vx2 *= 0.85;
+          vy2 *= 0.85;
+        }
+
+        // --- Tag mode logic ---
+        if (tagMode && tagCooldown <= 0) {
+          // If "it" touches the other, tag happens
+          if (itPlayer === 1 && dist < radius * 2) {
+            itPlayer = 2;
+            tagMessage = "Player 1 tagged Player 2!";
+            tagMessageTimer = 1.5;
+            tagCooldown = 1.0;
+          } else if (itPlayer === 2 && dist < radius * 2) {
+            itPlayer = 1;
+            tagMessage = "Player 2 tagged Player 1!";
+            tagMessageTimer = 1.5;
+            tagCooldown = 1.0;
+          }
+        }
+      }
+    }
+
+    function update() {
+      // Blue circle (arrow keys)
+      if (keys.ArrowUp)    vy1 -= accel;
+      if (keys.ArrowDown)  vy1 += accel;
+      if (keys.ArrowLeft)  vx1 -= accel;
+      if (keys.ArrowRight) vx1 += accel;
+
+      // Green circle (asdw)
+      if (keys.w) vy2 -= accel;
+      if (keys.s) vy2 += accel;
+      if (keys.a) vx2 -= accel;
+      if (keys.d) vx2 += accel;
+
+      // Clamp speed
+      vx1 = Math.max(-maxSpeed, Math.min(maxSpeed, vx1));
+      vy1 = Math.max(-maxSpeed, Math.min(maxSpeed, vy1));
+      vx2 = Math.max(-maxSpeed, Math.min(maxSpeed, vx2));
+      vy2 = Math.max(-maxSpeed, Math.min(maxSpeed, vy2));
+
+      // Apply friction
+      vx1 *= friction;
+      vy1 *= friction;
+      vx2 *= friction;
+      vy2 *= friction;
+
+      // Stop if very slow
+      if (Math.abs(vx1) < 0.05) vx1 = 0;
+      if (Math.abs(vy1) < 0.05) vy1 = 0;
+      if (Math.abs(vx2) < 0.05) vx2 = 0;
+      if (Math.abs(vy2) < 0.05) vy2 = 0;
+
+      // Update positions
+      x1 += vx1;
+      y1 += vy1;
+      x2 += vx2;
+      y2 += vy2;
+
+      // Handle collision between circles (and tag logic)
+      handleCircleCollision();
+
+      // Keep blue circle inside canvas, bounce
+      if (x1 - radius < 0) {
+        x1 = radius;
+        vx1 = Math.abs(vx1) * 0.6;
+      }
+      if (x1 + radius > canvas.width) {
+        x1 = canvas.width - radius;
+        vx1 = -Math.abs(vx1) * 0.6;
+      }
+      if (y1 - radius < 0) {
+        y1 = radius;
+        vy1 = Math.abs(vy1) * 0.6;
+      }
+      if (y1 + radius > canvas.height) {
+        y1 = canvas.height - radius;
+        vy1 = -Math.abs(vy1) * 0.6;
+      }
+
+      // Keep green circle inside canvas, bounce
+      if (x2 - radius < 0) {
+        x2 = radius;
+        vx2 = Math.abs(vx2) * 0.6;
+      }
+      if (x2 + radius > canvas.width) {
+        x2 = canvas.width - radius;
+        vx2 = -Math.abs(vx2) * 0.6;
+      }
+      if (y2 - radius < 0) {
+        y2 = radius;
+        vy2 = Math.abs(vy2) * 0.6;
+      }
+      if (y2 + radius > canvas.height) {
+        y2 = canvas.height - radius;
+        vy2 = -Math.abs(vy2) * 0.6;
+      }
+
+      // Tag mode timers
+      if (tagMode) {
+        if (tagCooldown > 0) tagCooldown -= 1/60;
+        if (tagMessageTimer > 0) tagMessageTimer -= 1/60;
+      }
+    }
+
+    function draw(time) {
+      // Draw background
+      ctx.fillStyle = "#222";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw player 1 circle (arrow keys)
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x1, y1, radius, 0, Math.PI * 2);
+      ctx.fillStyle = colorChoices[p1ColorIdx].color;
+      // If tagMode and player 1 is "it", glow red
+      if (tagMode && itPlayer === 1) {
+        ctx.shadowColor = '#f00';
+        ctx.shadowBlur = 32;
+      } else {
+        ctx.shadowColor = '#fff';
+        ctx.shadowBlur = 12;
+      }
+      ctx.fill();
+      ctx.closePath();
+      ctx.restore();
+
+      // Draw player 2 circle (wasd)
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x2, y2, radius, 0, Math.PI * 2);
+      ctx.fillStyle = colorChoices[p2ColorIdx].color;
+      // If tagMode and player 2 is "it", glow red
+      if (tagMode && itPlayer === 2) {
+        ctx.shadowColor = '#f00';
+        ctx.shadowBlur = 32;
+      } else {
+        ctx.shadowColor = '#fff';
+        ctx.shadowBlur = 12;
+      }
+      ctx.fill();
+      ctx.closePath();
+      ctx.restore();
+
+      ctx.shadowBlur = 0;
+
+      // Tag mode: NO "IT" indicator, just glow red for "it"
+      if (tagMode) {
+        // Show tag message if any
+        if (tagMessage && tagMessageTimer > 0) {
+          ctx.save();
+          ctx.font = "bold 2em Segoe UI, Arial, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.globalAlpha = Math.min(1, tagMessageTimer * 1.2);
+          ctx.fillStyle = "#ff8";
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 6;
+          ctx.strokeText(tagMessage, canvas.width/2, 40);
+          ctx.fillText(tagMessage, canvas.width/2, 40);
+          ctx.restore();
+        }
+      }
+    }
+
+    let lastTime = null;
+    function gameLoop(time) {
+      // Use a fixed timestep for physics to reduce jitter
+      if (lastTime === null) lastTime = time;
+      let dt = (time - lastTime) / 1000;
+      // Clamp dt to avoid big jumps
+      dt = Math.min(dt, 0.04);
+      // Run update multiple times if needed for stability
+      const step = 1/60;
+      let accumulator = dt;
+      while (accumulator > 0) {
+        update();
+        accumulator -= step;
+      }
+      draw(time || 0);
+      lastTime = time;
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Re-center the circles if the window is resized
+    window.addEventListener('resize', () => {
+      x1 = Math.max(radius, Math.min(x1, canvas.width - radius));
+      y1 = Math.max(radius, Math.min(y1, canvas.height - radius));
+      x2 = Math.max(radius, Math.min(x2, canvas.width - radius));
+      y2 = Math.max(radius, Math.min(y2, canvas.height - radius));
+    });
+
+    // Don't start the game loop until after color selection and space pressed!
+    // gameLoop() is called after space is pressed.
+  </script>
+</body>
+</html>

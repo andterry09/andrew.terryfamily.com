@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bounce Higher!</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      background: linear-gradient(to top, #52a1fa 0%, #d2ebff 100%);
+    }
+    #gameCanvas {
+      display: block;
+      background: linear-gradient(to top, #6bd6fd 60%, #fff 100%);
+      margin: 0 auto;
+      box-shadow: 0 8px 32px #0004;
+      border-bottom: 3px solid #2783ba;
+    }
+    #gameOverScreen {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.65);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 2em;
+      z-index: 10;
+      letter-spacing: 2px;
+    }
+    #restartBtn {
+      background: #218ddd;
+      border: none;
+      color: white;
+      font-size: 1.2em;
+      margin-top: 30px;
+      padding: 15px 44px;
+      border-radius: 18px;
+      box-shadow: 0 2px 8px #15679b88;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.12s;
+    }
+    #restartBtn:hover {
+      background: #1570b0;
+    }
+    #scoreBar {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.85);
+      color: #1965ad;
+      font-size: 1.3em;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      padding: 7px 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px #2274a844;
+      pointer-events: none;
+      z-index:3;
+    }
+    #nameInputBox {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 18px;
+      font-size: 0.8em;
+      gap: 6px;
+    }
+    #nameInput {
+      font-size: 1em;
+      border-radius: 8px;
+      padding: 4px 10px;
+      border: none;
+      min-width: 110px;
+      text-align: center;
+      margin-bottom: 5px;
+    }
+    #submitNameBtn {
+      background: #23b86c;
+      color: #fff;
+      font-size: 1em;
+      padding: 7px 16px;
+      margin-top: 4px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.14s;
+    }
+    #submitNameBtn:hover {
+      background: #198c55;
+    }
+    #scoreBoardContainer {
+      position: absolute;
+      right: 26px;
+      top: 36px;
+      width: 290px;
+      background: rgba(255,255,255,0.96);
+      color: #1a347a;
+      border-radius: 14px;
+      box-shadow: 0 6px 28px #2063aa22;
+      padding: 14px 24px 14px 18px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 1em;
+      z-index: 999;
+    }
+    #scoreBoardTitle {
+      font-size: 1.27em;
+      font-weight: bold;
+      margin-bottom: 6px;
+      text-align: left;
+      letter-spacing: 1px;
+      color: #1479bc;
+    }
+    #scoreBoard {
+      width: 100%;
+      margin-top: 0;
+      list-style: none;
+      padding: 0;
+      max-height: 260px;
+      overflow-y: auto;
+      box-sizing: border-box;
+      font-size: 1em;
+    }
+    .scoreRow {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #ddd;
+      padding: 4px 0 3px 0;
+      align-items: center;
+      font-size: 1em;
+    }
+    .scoreRow.mine {
+      background: #ddfcee;
+      font-weight: bold;
+      color: #155939;
+      border-radius: 6px;
+    }
+    #clearScoreBtn {
+      background: #ff5858;
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      padding: 3px 10px;
+      font-size: 0.9em;
+      cursor: pointer;
+      margin-top: 10px;
+      margin-bottom: 0;
+      float: right;
+      margin-left: 5px;
+      transition: background 0.13s;
+    }
+    #clearScoreBtn:hover {
+      background: #d63636;
+    }
+    /* Danger Ball Styling */
+    .dangerball-glow {
+      filter: drop-shadow(0px 0px 10px #ec2f2f77);
+    }
+    @media (max-width: 600px) {
+      #scoreBoardContainer {
+        width: 94vw;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        top: auto;
+        bottom: 12px;
+        font-size: 0.99em;
+        padding: 8px 4vw 8px 3vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="420" height="700"></canvas>
+  <div id="scoreBar">Score: 0</div>
+  <div id="scoreBoardContainer">
+    <div id="scoreBoardTitle">🏆 High Scores</div>
+    <ul id="scoreBoard"></ul>
+    <button id="clearScoreBtn" title="Clear all scores">Clear</button>
+  </div>
+  <div id="gameOverScreen" style="display:none;">
+    <div id="gameOverMsg">Game Over!</div>
+    <div id="finalScore" style="font-size:0.8em;margin-top:8px;"></div>
+
+    <div id="nameInputBox">
+      <input type="text" id="nameInput" maxlength="12" placeholder="Enter Your Name" autocomplete="off"/>
+      <button id="submitNameBtn">Submit Score</button>
+    </div>
+    <button id="restartBtn">Restart</button>
+  </div>
+
+  <script>
+    // High score board helpers (localStorage based)
+    const SCORES_KEY = 'bounce_higher_scores_v1';
+
+    function loadScores() {
+      try {
+        let arr = JSON.parse(localStorage.getItem(SCORES_KEY)) || [];
+        if (!Array.isArray(arr)) arr = [];
+        return arr;
+      } catch (e) { return []; }
+    }
+
+    function saveScores(scores) {
+      localStorage.setItem(SCORES_KEY, JSON.stringify(scores));
+    }
+
+    function addScoreEntry(name, score) {
+      let scores = loadScores();
+      scores.push({name:name||'Anonymous', score, ts:Date.now()});
+      // Sort descending, keep all (per prompt), but could keep only top N.
+      scores.sort((a,b)=>b.score-a.score || a.ts-b.ts);
+      saveScores(scores);
+      return scores;
+    }
+
+    function clearAllScores() {
+      localStorage.removeItem(SCORES_KEY);
+    }
+
+    function renderScoreBoard(highlightEntry) {
+      const ul = document.getElementById('scoreBoard');
+      let scores = loadScores();
+      ul.innerHTML = '';
+      let youFound = false;
+      scores.forEach((data,i)=>{
+        const li = document.createElement('li');
+        li.className = "scoreRow";
+        if (
+          highlightEntry &&
+          data.name === highlightEntry.name &&
+          data.score === highlightEntry.score &&
+          data.ts === highlightEntry.ts
+        ) {
+          li.classList.add('mine');
+          youFound = true;
+        }
+        let displayName = data.name.replace(/</g,'&lt;').replace(/>/g,"&gt;");
+        if (displayName.trim() == "") displayName = "Anonymous";
+        if (displayName.length > 14) displayName = displayName.slice(0,12) + '…';
+        li.innerHTML = `<span style="overflow:hidden;">${String(i+1).padStart(2,"0")}. ${displayName}</span>
+          <span style="font-family:monospace;margin-left:14px;">${data.score}</span>`;
+        ul.appendChild(li);
+      });
+      // If not found, you recently scored but it was not added, scroll to top
+      if (!youFound) ul.scrollTop = 0;
+    }
+
+    // Game settings
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    let platforms = [];
+    let player, cameraY, velocityY, jumpPower, gravity, score, maxHeight, playing;
+    let lastCameraY; // For score calculation
+
+    // For animating falling platforms
+    let hasFalling = false;
+
+    let recentMyScore = null; // For highlighting
+    let enterNameStep = false; // Waiting for name
+
+    // -------- Danger Ball variables --------
+    let dangerBalls = []; // Active falling balls {x, y, vy, radius}
+    // We'll replace the old cooldown/trigger logic with timer logic
+    let dangerBallStarted = false;      // Flag when 7000 is first passed
+    let dangerBallStartTimestamp = 0;   // When we first hit 7000
+    let dangerBallNextSpawn = 0;        // Time for next ball (ms)
+    // ---------------------------------------
+
+    function resetGame() {
+      gravity = 0.5;
+      jumpPower = 12;
+      velocityY = 0;
+      cameraY = 0;
+      maxHeight = 0;
+      score = 0;
+      playing = true;
+      lastCameraY = 0;
+      player = {
+        x: w/2,
+        y: h-80,
+        width: 42,
+        height: 42,
+        vx: 0,
+        vy: 0,
+      };
+      platforms = [];
+      // Danger balls/timers reset
+      dangerBalls = [];
+      dangerBallStarted = false;
+      dangerBallStartTimestamp = 0;
+      dangerBallNextSpawn = 0;
+
+      // Always place a solid (non-falling) platform under the starting position of the player.
+      const startingPlatformWidth = 90;
+      const startingPlatformHeight = 16;
+      const startingPlatformY = h-36; // Just under player.y=h-80, player.height=42!
+      const startingPlatformX = w/2 - startingPlatformWidth/2;
+      platforms.push({
+        x: startingPlatformX,
+        y: startingPlatformY,
+        width: startingPlatformWidth,
+        height: startingPlatformHeight,
+        type: 'normal', // normal = green non-falling
+        falling: false,
+        fallVy: 0
+      });
+
+      // Add random platforms above
+      let py = startingPlatformY - 80;
+      while (py > -800) {
+        addPlatform(py);
+        py -= 80;
+      }
+    }
+
+    // Add a platform at position y. If the score is at least 5000, may be falling ("black") type.
+    function addPlatform(y) {
+      const x = Math.random() * (w - 90) + 20;
+      let ptype = 'normal', falling = false;
+
+      // After score 5000, randomly some platforms will be falling "black" platforms
+      if (score >= 5000 && Math.random()<0.22) { // About 22% chance to be falling after 5k
+        ptype = 'falling';
+        falling = false;
+      }
+      platforms.push({ 
+        x: x, 
+        y: y, 
+        width: 70 + Math.random()*26, 
+        height: 16, 
+        type: ptype, // 'normal' or 'falling'
+        falling: falling, // true if already falling (after being stepped on)
+        fallVy: 0    // falling velocity (if falling)
+      });
+    }
+
+    function drawPlayer() {
+      ctx.save();
+      ctx.translate(player.x, player.y - cameraY);
+      // Body
+      ctx.beginPath();
+      ctx.arc(0, 0, player.width/2, 0, Math.PI*2);
+      ctx.fillStyle = '#fffa89';
+      ctx.shadowColor='#bbb02d';
+      ctx.shadowBlur=10;
+      ctx.fill();
+      ctx.shadowBlur=0;
+      // Face
+      ctx.beginPath();
+      ctx.arc(-10, -8, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#584e1a';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(10, -8, 4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(0, 6, 10, Math.PI*0.15, Math.PI*0.85, false);
+      ctx.strokeStyle="#584e1a";
+      ctx.lineWidth=2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawPlatform(pf) {
+      ctx.save();
+      ctx.translate(pf.x, pf.y - cameraY);
+
+      if (pf.type === 'falling') {
+        ctx.fillStyle = pf.falling ? "#222" : "#000"; // black (a little gray if falling for a frame effect)
+      } else {
+        ctx.fillStyle = '#4fc850';
+      }
+      ctx.beginPath();
+      ctx.roundRect(0, 0, pf.width, pf.height, [10]);
+      ctx.fill();
+
+      if (pf.type === 'falling') {
+        // for black platforms, a subtle specular "shine"
+        ctx.globalAlpha = 0.08;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(8, 2, pf.width-16, 4);
+        ctx.globalAlpha = 1.0;
+      } else {
+        // Green platform highlights and shadow
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(8, 2, pf.width-16, 4);
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+
+    // --- Draw danger balls
+    function drawDangerBall(ball) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y - cameraY, ball.radius, 0, Math.PI*2);
+      ctx.fillStyle = "#ec2f2f";
+      ctx.shadowColor = "#ec2f2f";
+      ctx.shadowBlur = 14;
+      ctx.globalAlpha = 0.95;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      // Add highlight
+      ctx.beginPath();
+      ctx.arc(ball.x - ball.radius/2, ball.y - cameraY - ball.radius/2, ball.radius/2.1, 0, Math.PI*1.7, true);
+      ctx.globalAlpha = 0.31;
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+    // ---
+
+    let leftHeld = false, rightHeld = false;
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code=="ArrowLeft"||e.code=="KeyA") leftHeld = true;
+      if (e.code=="ArrowRight"||e.code=="KeyD") rightHeld = true;
+      if (!playing && (e.code=="Space"||e.code=="ArrowUp"||e.code=="KeyW")) {
+        // If we just finished a game and are showing name entry, do not bypass it
+        if (!enterNameStep) {
+          document.getElementById('gameOverScreen').style.display="none";
+          resetGame();
+          requestAnimationFrame(loop);
+        }
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.code=="ArrowLeft"||e.code=="KeyA") leftHeld = false;
+      if (e.code=="ArrowRight"||e.code=="KeyD") rightHeld = false;
+    });
+
+    document.getElementById('restartBtn').onclick = () => {
+      if (!enterNameStep) {
+        document.getElementById('gameOverScreen').style.display="none";
+        resetGame();
+        requestAnimationFrame(loop);
+      }
+    }
+
+    canvas.addEventListener('touchstart', (e)=>{
+      let tx = e.touches[0].clientX - canvas.getBoundingClientRect().left;
+      leftHeld = tx < w/2;
+      rightHeld = tx > w/2;
+    });
+    canvas.addEventListener('touchend', ()=>{
+      leftHeld = rightHeld = false;
+    });
+
+    // Ball only starts falling after reaching 7000, then first ball is after 15 seconds, subsequent balls every 15s
+    function updateDangerBalls() {
+      // If score < 7000, danger balls do not appear
+      if (score < 7000) {
+        dangerBalls = [];
+        dangerBallStarted = false;
+        dangerBallStartTimestamp = 0;
+        dangerBallNextSpawn = 0;
+        return;
+      }
+
+      // When we reach 7000 the first time, record time
+      if (!dangerBallStarted) {
+        dangerBallStarted = true;
+        dangerBallStartTimestamp = Date.now();
+        // Schedule first spawn at +15000ms
+        dangerBallNextSpawn = dangerBallStartTimestamp + 15000;
+        return; // Don't spawn immediately on the same frame we reach 7000
+      }
+
+      // If it's time, spawn a new danger ball
+      let now = Date.now();
+      if (now >= dangerBallNextSpawn) {
+        // Spawn a new ball
+        let ballRadius = 16 + Math.random()*8;
+        let safeGap = player.width+24;
+        let x;
+        let tries = 0;
+        do {
+          x = 28 + Math.random()*(w-56);
+          tries++;
+        } while(Math.abs(x - player.x) < safeGap && tries < 50);
+        let vy = 5.8 + Math.random()*2.1;
+        dangerBalls.push({
+          x: x,
+          y: cameraY - 75 - ballRadius - Math.random()*75,
+          vy: vy,
+          radius: ballRadius,
+        });
+        // Schedule next spawn for 15 seconds later
+        dangerBallNextSpawn = now + 15000;
+      }
+
+      // Move balls
+      let toRemove = [];
+      for (let i = 0; i < dangerBalls.length; ++i) {
+        dangerBalls[i].y += dangerBalls[i].vy;
+        // Remove if offscreen (below/far below)
+        if (dangerBalls[i].y - cameraY > h+120) toRemove.push(i);
+      }
+      for (let i = toRemove.length-1; i>=0; --i) {
+        dangerBalls.splice(toRemove[i],1); // Remove from array
+      }
+    }
+
+    function checkDangerBallCollisions() {
+      // Ball danger only after 7000
+      if (score < 7000) return false;
+      for (const b of dangerBalls) {
+        let px = player.x;
+        let py = player.y;
+        let distSq =
+          (px - b.x) * (px - b.x) +
+          (py - b.y) * (py - b.y);
+        // Consider slightly forgiving hitbox, or true geometry:
+        let playerRadius = player.width/2*0.94;
+        let effDist = playerRadius + b.radius*0.89;
+        if (distSq <= effDist * effDist) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function update() {
+      // Horizontal
+      if (leftHeld)
+        player.vx = Math.max(player.vx-0.7, -5);
+      else if (rightHeld)
+        player.vx = Math.min(player.vx+0.7, 5);
+      else
+        player.vx *= 0.86;
+
+      player.x += player.vx;
+
+      if (player.x<player.width/2) {
+        player.x=player.width/2; player.vx *= -0.15;
+      }
+      if (player.x>w-player.width/2) {
+        player.x=w-player.width/2; player.vx *= -0.15;
+      }
+
+      // Vertical velocity
+      player.vy += gravity;
+      player.y += player.vy;
+
+      // Camera follows player only upwards
+      let prevCameraY = cameraY; // Save old cameraY before changing it
+      if (player.y < cameraY + h/3) {
+        cameraY = player.y - h/3;
+      }
+      // Give 1 point per pixel screen moves up (change in -cameraY)
+      if (cameraY < prevCameraY) {
+        let delta = Math.floor(prevCameraY - cameraY);
+        score += delta;
+        if (score < 0) score = 0;
+      }
+
+      // Collide with platforms only if falling
+      if (player.vy>0) {
+        for (const pf of platforms) {
+          // Check if platform is eligible for collision (if it's visible and not falling yet)
+          if (
+            player.x + player.width/2 > pf.x &&
+            player.x - player.width/2 < pf.x + pf.width &&
+            player.y + player.height/2 > pf.y &&
+            player.y + player.height/2 - player.vy < pf.y + pf.height / 2 &&
+            player.y + player.height/2 < pf.y + pf.height + 9
+          ) {
+            // normal or falling platform
+            if (pf.type === 'falling') {
+              if (!pf.falling) {
+                pf.falling = true;
+                pf.fallVy = 1; // Start falling at 1px/frame, then accelerates
+              }
+              // You can still bounce ONCE (the frame you activated it)
+              player.vy = -jumpPower;
+              if (cameraY<-600)
+                player.vy -= 1.3;
+              // only bounce ONCE per stepping
+              continue;
+            } else {
+              // bounce!
+              player.vy = -jumpPower;
+              if (cameraY<-600)
+                player.vy -= 1.3;
+            }
+          }
+        }
+      }
+
+      // Animate falling platforms
+      for (let pf of platforms) {
+        if (pf.type === "falling" && pf.falling) {
+          pf.fallVy += 0.45; // Accelerate fall
+          pf.y += pf.fallVy;
+        }
+      }
+
+      // Remove platforms below
+      platforms = platforms.filter(pf => pf.y > cameraY - 20 && (!pf.falling || pf.y < cameraY+h+180));
+
+      // Add more platforms as needed
+      let pfTop = Math.min(...platforms.map(p=>p.y));
+      while (pfTop > cameraY - 400) {
+        addPlatform(pfTop - 80 - Math.random()*22);
+        pfTop = Math.min(...platforms.map(p=>p.y));
+      }
+
+      document.getElementById('scoreBar').innerText = `Score: ${score}`;
+
+      // For informational use if needed (no longer used for scoring)
+      let currHeight = Math.round(-(player.y - (h-80)));
+      if (currHeight > maxHeight) {
+        maxHeight = currHeight;
+      }
+
+      // --- DANGER BALL LOGIC ---
+      updateDangerBalls();
+      if (checkDangerBallCollisions()) {
+        playing = false;
+        setTimeout(()=>{
+          document.getElementById('gameOverScreen').style.display = "flex";
+          document.getElementById('finalScore').innerText = 'You were hit by a meteor at height '+maxHeight+'!';
+          document.getElementById('nameInputBox').style.display = "flex";
+          document.getElementById('submitNameBtn').disabled = false;
+          document.getElementById('nameInput').disabled = false;
+          enterNameStep = true;
+          setTimeout(()=>{
+            try { document.getElementById('nameInput').focus(); } catch(e){}
+          },55);
+        },380);
+        return; // Processing stops; otherwise may get double gameover!
+      }
+      // -------------------------
+
+      // Game over if player falls below screen
+      if (player.y - cameraY > h + 100) {
+        playing = false;
+        setTimeout(()=>{
+          // Show gameover
+          document.getElementById('gameOverScreen').style.display = "flex";
+          document.getElementById('finalScore').innerText = 'You reached height '+maxHeight+'!';
+          // Show name entry box
+          document.getElementById('nameInputBox').style.display = "flex";
+          document.getElementById('submitNameBtn').disabled = false;
+          document.getElementById('nameInput').disabled = false;
+          enterNameStep = true;
+          // Autofocus name input if possible
+          setTimeout(()=>{
+            try { document.getElementById('nameInput').focus(); } catch(e){}
+          }, 55);
+        }, 380);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, w, h);
+
+      // Draw platforms
+      for (const pf of platforms) {
+        drawPlatform(pf);
+      }
+
+      // Draw danger balls (if any)
+      for (const b of dangerBalls) {
+        drawDangerBall(b);
+      }
+
+      // Draw player
+      drawPlayer();
+
+      // (optional) draw an indicator after 7000 score
+      if (score >= 7000) {
+        // Draw warning icon at top
+        ctx.save();
+        let warnAlpha = 0.33 + 0.17*Math.sin(Date.now()/200);
+        ctx.globalAlpha = warnAlpha;
+        ctx.font = "bold 24px Arial";
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3;
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#ec2f2f";
+        ctx.strokeText("☄", w/2, 36);
+        ctx.fillText("☄", w/2, 36);
+        ctx.restore();
+      }
+    }
+
+    function loop() {
+      if (playing) {
+        update();
+        render();
+        requestAnimationFrame(loop);
+      }
+    }
+
+    // Name input and submit logic
+    function submitScore() {
+      const nameInput = document.getElementById('nameInput');
+      let playerName = nameInput.value.trim();
+      if (playerName === "" && maxHeight === 0) return; // nothing to record
+      // Set anon if blank name
+      if (playerName.length > 20) playerName = playerName.slice(0,20);
+      if (playerName.replace(/[^a-zA-Z0-9 _\-]/g, '').trim() === '') playerName = "Anonymous";
+
+      // Save score
+      if (maxHeight > 0) {
+        const entry = {name: playerName, score: maxHeight, ts: Date.now()};
+        const scores = addScoreEntry(playerName, maxHeight);
+        recentMyScore = {...entry};
+        renderScoreBoard(recentMyScore);
+      }
+
+      document.getElementById('nameInputBox').style.display = "none";
+      enterNameStep = false;
+      document.getElementById('gameOverScreen').style.display="none";
+      resetGame();
+      requestAnimationFrame(loop);
+    }
+
+    document.getElementById('submitNameBtn').onclick = submitScore;
+
+    // Also submit on Enter keypress in name box
+    document.getElementById('nameInput').addEventListener('keydown', function(e){
+      if (e.code === "Enter" || e.keyCode === 13) {
+        submitScore();
+      }
+    });
+
+    // Clear Scores button logic
+    document.getElementById('clearScoreBtn').onclick = function() {
+      if (confirm("Are you sure you want to clear all scores?")) {
+        clearAllScores();
+        renderScoreBoard();
+      }
+    };
+
+    // Initial
+    resetGame();
+    render();
+
+    // Scoreboard up front
+    renderScoreBoard();
+
+    ctx.font = "28px Arial";
+    ctx.fillStyle = "#2169ba";
+    ctx.textAlign = "center";
+    ctx.fillText("← → or A/D to move", w/2, h/2-23);
+    ctx.fillText("Bounce up, don't fall!", w/2, h/2+19);
+    setTimeout(()=>{
+      requestAnimationFrame(loop);
+    },900);
+
+    // Hide name input, reset when starting a new game
+    document.getElementById('nameInputBox').style.display = "none";
+
+    // On focus, select all text in name field
+    document.getElementById('nameInput').addEventListener('focus', function(e){
+      this.select();
+    });
+
+  </script>
+</body>
+</html>

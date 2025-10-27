@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Archery Game</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #score {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #level {
+            position: fixed;
+            top: 50px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #targets {
+            position: fixed;
+            top: 80px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            pointer-events: none;
+            user-select: none;
+            z-index: 1000;
+        }
+        #crosshair::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 5px rgba(255,255,255,0.5);
+        }
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 0 5px rgba(255,255,255,0.5);
+        }
+        #instructions {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            text-align: center;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            pointer-events: none;
+            user-select: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0</div>
+    <div id="level">Level: 1</div>
+    <div id="targets">Targets Left: 5</div>
+    <div id="crosshair"></div>
+    <div id="instructions">Click to start<br>Hold mouse button to draw bow<br>Release to shoot</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let score = 0;
+        let level = 1;
+        let targetsLeft = 5;
+        let isDrawing = false;
+        let drawStrength = 0;
+        let arrows = [];
+        let targets = [];
+        let currentLevel = {
+            targetCount: 5,
+            targetSpeed: 0.5,
+            targetSize: 1,
+            targetDistance: 20
+        };
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        // Create fence
+        function createFence() {
+            const fenceGeometry = new THREE.BoxGeometry(10, 2, 0.2);
+            const fenceMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const fence = new THREE.Mesh(fenceGeometry, fenceMaterial);
+            fence.position.set(0, 1, -2);
+            scene.add(fence);
+        }
+
+        // Create platform
+        function createPlatform() {
+            // Main platform
+            const platformGeometry = new THREE.BoxGeometry(8, 0.5, 4);
+            const platformMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x8B4513,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+            platform.position.set(0, 0, -2);
+            scene.add(platform);
+
+            // Platform supports
+            const supportGeometry = new THREE.BoxGeometry(0.3, 2, 0.3);
+            const supportMaterial = new THREE.MeshPhongMaterial({ color: 0x654321 });
+            
+            // Front left support
+            const support1 = new THREE.Mesh(supportGeometry, supportMaterial);
+            support1.position.set(-3, -1, -0.5);
+            scene.add(support1);
+            
+            // Front right support
+            const support2 = new THREE.Mesh(supportGeometry, supportMaterial);
+            support2.position.set(3, -1, -0.5);
+            scene.add(support2);
+            
+            // Back left support
+            const support3 = new THREE.Mesh(supportGeometry, supportMaterial);
+            support3.position.set(-3, -1, -3.5);
+            scene.add(support3);
+            
+            // Back right support
+            const support4 = new THREE.Mesh(supportGeometry, supportMaterial);
+            support4.position.set(3, -1, -3.5);
+            scene.add(support4);
+
+            // Add wooden planks texture
+            const plankGeometry = new THREE.BoxGeometry(8, 0.1, 0.5);
+            const plankMaterial = new THREE.MeshPhongMaterial({ color: 0xA0522D });
+            
+            for (let i = 0; i < 8; i++) {
+                const plank = new THREE.Mesh(plankGeometry, plankMaterial);
+                plank.position.set(0, 0.3, -2 + (i * 0.5));
+                scene.add(plank);
+            }
+        }
+
+        // Create bow
+        function createBow() {
+            const bowGroup = new THREE.Group();
+            
+            // Bow handle
+            const handleGeometry = new THREE.BoxGeometry(0.2, 1, 0.2);
+            const handleMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+            bowGroup.add(handle);
+
+            // Bow limbs
+            const limbGeometry = new THREE.BoxGeometry(0.1, 1.5, 0.1);
+            const limbMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const leftLimb = new THREE.Mesh(limbGeometry, limbMaterial);
+            leftLimb.position.set(-0.3, 0, 0);
+            leftLimb.rotation.z = Math.PI / 4;
+            bowGroup.add(leftLimb);
+
+            const rightLimb = new THREE.Mesh(limbGeometry, limbMaterial);
+            rightLimb.position.set(0.3, 0, 0);
+            rightLimb.rotation.z = -Math.PI / 4;
+            bowGroup.add(rightLimb);
+
+            bowGroup.position.set(0, 0, -2);
+            scene.add(bowGroup);
+            return bowGroup;
+        }
+
+        // Create wall
+        function createWall() {
+            // Main wall
+            const wallGeometry = new THREE.BoxGeometry(20, 8, 1);
+            const wallMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x808080,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+            wall.position.set(0, 4, -currentLevel.targetDistance);
+            scene.add(wall);
+
+            // Add wooden frame
+            const frameGeometry = new THREE.BoxGeometry(20.5, 8.5, 0.2);
+            const frameMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+            frame.position.set(0, 4, -currentLevel.targetDistance - 0.6);
+            scene.add(frame);
+
+            // Add target mounting boards
+            for (let i = 0; i < 3; i++) {
+                const boardGeometry = new THREE.BoxGeometry(6, 0.3, 0.1);
+                const boardMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+                const board = new THREE.Mesh(boardGeometry, boardMaterial);
+                board.position.set(0, 2 + i * 2, -currentLevel.targetDistance - 0.5);
+                scene.add(board);
+            }
+
+            return wall;
+        }
+
+        // Create target
+        function createTarget(x, y, z) {
+            const targetGroup = new THREE.Group();
+            
+            // Target backing (straw bale)
+            const backingGeometry = new THREE.CylinderGeometry(1.5, 1.5, 0.3, 32);
+            const backingMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xD2B48C,
+                roughness: 1.0,
+                metalness: 0.0
+            });
+            const backing = new THREE.Mesh(backingGeometry, backingMaterial);
+            backing.rotation.x = Math.PI / 2;
+            targetGroup.add(backing);
+
+            // Target face (paper)
+            const faceGeometry = new THREE.CircleGeometry(1.4, 32);
+            const faceMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xF5F5F5,
+                side: THREE.DoubleSide
+            });
+            const face = new THREE.Mesh(faceGeometry, faceMaterial);
+            face.rotation.x = -Math.PI / 2;
+            face.position.z = 0.16;
+            targetGroup.add(face);
+            
+            // Target rings with proper archery target colors and sizes
+            const rings = [
+                { radius: 1.3, color: 0xFFFFFF }, // White - 1 point
+                { radius: 1.0, color: 0xFFFFFF }, // White - 2 points
+                { radius: 0.7, color: 0x000000 }, // Black - 3 points
+                { radius: 0.7, color: 0x000000 }, // Black - 4 points
+                { radius: 0.4, color: 0x0000FF }, // Blue - 5 points
+                { radius: 0.4, color: 0x0000FF }, // Blue - 6 points
+                { radius: 0.25, color: 0xFF0000 }, // Red - 7 points
+                { radius: 0.25, color: 0xFF0000 }, // Red - 8 points
+                { radius: 0.1, color: 0xFFD700 }  // Gold - 10 points
+            ];
+
+            rings.forEach((ring, index) => {
+                const ringGeometry = new THREE.RingGeometry(
+                    index % 2 === 0 ? ring.radius - 0.15 : ring.radius,
+                    ring.radius,
+                    32
+                );
+                const ringMaterial = new THREE.MeshPhongMaterial({ 
+                    color: ring.color,
+                    side: THREE.DoubleSide
+                });
+                const ringMesh = new THREE.Mesh(ringGeometry, ringMaterial);
+                ringMesh.rotation.x = -Math.PI / 2;
+                ringMesh.position.z = 0.17;
+                targetGroup.add(ringMesh);
+            });
+
+            // Add mounting bracket
+            const bracketGeometry = new THREE.BoxGeometry(0.2, 1.2, 0.2);
+            const bracketMaterial = new THREE.MeshPhongMaterial({ color: 0x696969 });
+            const bracket = new THREE.Mesh(bracketGeometry, bracketMaterial);
+            bracket.position.set(0, -1.5, 0);
+            targetGroup.add(bracket);
+
+            targetGroup.position.set(x, y, z);
+            scene.add(targetGroup);
+            return targetGroup;
+        }
+
+        // Create arrow
+        function createArrow() {
+            const arrowGroup = new THREE.Group();
+            
+            // Arrow shaft
+            const shaftGeometry = new THREE.CylinderGeometry(0.02, 0.02, 1, 8);
+            const shaftMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+            const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+            shaft.rotation.x = Math.PI / 2;
+            arrowGroup.add(shaft);
+
+            // Arrow head
+            const headGeometry = new THREE.ConeGeometry(0.05, 0.2, 8);
+            const headMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 });
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.z = 0.5;
+            head.rotation.x = -Math.PI / 2;
+            arrowGroup.add(head);
+
+            // Arrow feathers
+            const featherGeometry = new THREE.BoxGeometry(0.1, 0.2, 0.02);
+            const featherMaterial = new THREE.MeshPhongMaterial({ color: 0xFFFFFF });
+            for (let i = 0; i < 3; i++) {
+                const feather = new THREE.Mesh(featherGeometry, featherMaterial);
+                feather.position.z = -0.4;
+                feather.position.y = 0.05 * Math.cos(i * Math.PI * 2 / 3);
+                feather.position.x = 0.05 * Math.sin(i * Math.PI * 2 / 3);
+                feather.rotation.z = i * Math.PI * 2 / 3;
+                arrowGroup.add(feather);
+            }
+
+            arrowGroup.position.copy(camera.position);
+            arrowGroup.rotation.copy(camera.rotation);
+            scene.add(arrowGroup);
+            return arrowGroup;
+        }
+
+        // Initialize game
+        function initGame() {
+            createFence();
+            createPlatform();
+            const bow = createBow();
+            camera.position.set(0, 1.7, -2);
+            
+            // Create wall and initial targets
+            const wall = createWall();
+            
+            // Create targets in a grid pattern
+            const targetPositions = [
+                {x: -4, y: 2}, {x: 0, y: 2}, {x: 4, y: 2},
+                {x: -4, y: 4}, {x: 0, y: 4}, {x: 4, y: 4},
+                {x: -4, y: 6}, {x: 0, y: 6}, {x: 4, y: 6}
+            ];
+
+            for (let i = 0; i < currentLevel.targetCount; i++) {
+                const pos = targetPositions[i % targetPositions.length];
+                const target = createTarget(
+                    pos.x,
+                    pos.y,
+                    -currentLevel.targetDistance - 0.1
+                );
+                targets.push({
+                    mesh: target,
+                    speed: currentLevel.targetSpeed,
+                    direction: Math.random() > 0.5 ? 1 : -1,
+                    originalX: pos.x
+                });
+            }
+        }
+
+        // Handle mouse movement
+        document.addEventListener('mousemove', (event) => {
+            if (document.pointerLockElement === document.body) {
+                const movementX = event.movementX || 0;
+                const movementY = event.movementY || 0;
+                camera.rotation.y -= movementX * 0.002;
+                camera.rotation.x -= movementY * 0.002;
+                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+            }
+        });
+
+        // Handle pointer lock
+        document.addEventListener('click', () => {
+            if (document.pointerLockElement !== document.body) {
+                document.body.requestPointerLock();
+                document.getElementById('instructions').style.display = 'none';
+            }
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === document.body) {
+                document.getElementById('instructions').style.display = 'none';
+            } else {
+                document.getElementById('instructions').style.display = 'block';
+            }
+        });
+
+        // Handle mouse down for drawing bow
+        document.addEventListener('mousedown', () => {
+            if (document.pointerLockElement === document.body) {
+                isDrawing = true;
+                drawStrength = 0;
+            }
+        });
+
+        // Handle mouse up for releasing arrow
+        document.addEventListener('mouseup', () => {
+            if (isDrawing) {
+                const arrow = createArrow();
+                const velocity = new THREE.Vector3(0, 0, -1)
+                    .applyQuaternion(camera.quaternion)
+                    .multiplyScalar(drawStrength * 2);
+                arrow.userData.velocity = velocity;
+                arrows.push(arrow);
+                isDrawing = false;
+            }
+        });
+
+        // Game loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update draw strength
+            if (isDrawing) {
+                drawStrength = Math.min(drawStrength + 0.02, 1);
+            }
+
+            // Update arrows
+            arrows.forEach((arrow, index) => {
+                arrow.position.add(arrow.userData.velocity);
+                arrow.rotation.x = Math.atan2(arrow.userData.velocity.y, arrow.userData.velocity.z);
+                arrow.rotation.y = Math.atan2(arrow.userData.velocity.x, arrow.userData.velocity.z);
+
+                // Check arrow collisions with targets
+                targets.forEach((target, targetIndex) => {
+                    if (arrow.position.distanceTo(target.mesh.position) < 1) {
+                        scene.remove(arrow);
+                        arrows.splice(index, 1);
+                        scene.remove(target.mesh);
+                        targets.splice(targetIndex, 1);
+                        score += 100;
+                        targetsLeft--;
+                        document.getElementById('score').textContent = 'Score: ' + score;
+                        document.getElementById('targets').textContent = 'Targets Left: ' + targetsLeft;
+
+                        if (targetsLeft === 0) {
+                            nextLevel();
+                        }
+                    }
+                });
+
+                // Remove arrows that are too far
+                if (arrow.position.distanceTo(camera.position) > 50) {
+                    scene.remove(arrow);
+                    arrows.splice(index, 1);
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // Next level
+        function nextLevel() {
+            level++;
+            currentLevel.targetCount += 2;
+            currentLevel.targetSpeed += 0.2;
+            currentLevel.targetDistance += 5;
+            targetsLeft = currentLevel.targetCount;
+
+            document.getElementById('level').textContent = 'Level: ' + level;
+            document.getElementById('targets').textContent = 'Targets Left: ' + targetsLeft;
+
+            // Remove old wall and create new one
+            scene.children = scene.children.filter(child => 
+                child !== wall && !targets.some(target => target.mesh === child)
+            );
+            const wall = createWall();
+
+            // Create new targets in grid pattern
+            const targetPositions = [
+                {x: -4, y: 2}, {x: 0, y: 2}, {x: 4, y: 2},
+                {x: -4, y: 4}, {x: 0, y: 4}, {x: 4, y: 4},
+                {x: -4, y: 6}, {x: 0, y: 6}, {x: 4, y: 6}
+            ];
+
+            for (let i = 0; i < currentLevel.targetCount; i++) {
+                const pos = targetPositions[i % targetPositions.length];
+                const target = createTarget(
+                    pos.x,
+                    pos.y,
+                    -currentLevel.targetDistance - 0.1
+                );
+                targets.push({
+                    mesh: target,
+                    speed: currentLevel.targetSpeed,
+                    direction: Math.random() > 0.5 ? 1 : -1,
+                    originalX: pos.x
+                });
+            }
+        }
+
+        // Start game
+        initGame();
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
