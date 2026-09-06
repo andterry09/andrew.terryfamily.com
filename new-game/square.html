@@ -251,33 +251,9 @@
     #shop-modal-bg, #shop-modal {
       display: none !important;
     }
-    /* Back button styles */
-    #back-button {
-      position: fixed;
-      top: 18px;
-      left: 18px;
-      z-index: 20;
-      background: linear-gradient(90deg, #333 60%, #4caf50 100%);
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      padding: 10px 22px;
-      font-size: 1.1rem;
-      font-weight: bold;
-      cursor: pointer;
-      box-shadow: 0 2px 8px #0005;
-      transition: background 0.15s, color 0.15s;
-      letter-spacing: 1px;
-      text-shadow: 0 2px 8px #0008;
-    }
-    #back-button:hover {
-      background: linear-gradient(90deg, #222 60%, #66bb6a 100%);
-      color: #aaffaa;
-    }
   </style>
 </head>
 <body>
-  <button id="back-button" title="Go Back">&larr; Back</button>
   <h1 style="margin-top:32px;letter-spacing:2px;text-shadow:0 2px 12px #000a;">Square Money Clicker</h1>
   <div id="container">
     <div id="click-area">
@@ -409,7 +385,6 @@
     const buyPerSec5m = document.getElementById('buy-per-sec-5m');
     const buyPerSec100m = document.getElementById('buy-per-sec-100m');
     const buyPerSec5b = document.getElementById('buy-per-sec-5b');
-    const backButton = document.getElementById('back-button');
 
     function updateUI() {
       moneyAmount.textContent = money;
@@ -646,11 +621,6 @@
         money, perClick, perSec
       }));
     }, 1000);
-
-    // Back button logic: go to homepage
-    backButton.addEventListener('click', function() {
-      window.location.href = "../index.html";
-    });
   </script>
 </body>
 </html>
