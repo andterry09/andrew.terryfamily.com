@@ -637,7 +637,7 @@ function hitsSolid(px, py) {
 // (lag spike, edge case), push them back out to its surface.
 function resolveSolids() {
   var r = player.r - 3;
-  for (var iter = 0; iter < 3; iter++) {
+  for (var iter = 0; iter < 6; iter++) {
     var best = 0, bx = 0, by = 0;
     var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
     for (var ty = pty - 1; ty <= pty + 1; ty++) {
@@ -697,8 +697,8 @@ function resolveSolids() {
       }
     }
     if (best <= 0) break;
-    player.x += bx;
-    player.y += by;
+    player.x += bx * 1.01; // tiny overshoot so we never rest exactly on the edge
+    player.y += by * 1.01;
   }
   player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
   player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
@@ -715,10 +715,15 @@ function update(dt) {
   if (len > 1) { dx /= len; dy /= len; }
   if (len > 0.01) { player.fx = dx / (len > 1 ? 1 : len); player.fy = dy / (len > 1 ? 1 : len); }
   var speed = (keys['shift'] ? 340 : 220) * dt;
-  var nx = player.x + dx * speed;
-  if (!hitsSolid(nx, player.y)) player.x = nx;
-  var ny = player.y + dy * speed;
-  if (!hitsSolid(player.x, ny)) player.y = ny;
+  // sub-steps so fast sprints can never jump over thin barriers
+  var steps = Math.max(1, Math.ceil(speed / 6));
+  var sx = dx * speed / steps, sy = dy * speed / steps;
+  for (var st = 0; st < steps; st++) {
+    var nx = player.x + sx;
+    if (!hitsSolid(nx, player.y)) player.x = nx;
+    var ny = player.y + sy;
+    if (!hitsSolid(player.x, ny)) player.y = ny;
+  }
   player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
   player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
   resolveSolids();
