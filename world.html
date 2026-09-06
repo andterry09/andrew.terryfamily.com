@@ -163,7 +163,8 @@ var bushes = new Uint8Array(W * H);
 var solid = new Uint8Array(W * H);
 var berryN = new Uint8Array(W * H);   // berries currently on a bush (0-3)
 var berryT = new Float32Array(W * H); // regrow timer per bush
-var litter = new Uint8Array(W * H); // forest floor: 0 none, 1 amber leaf, 2 red leaf, 3 stick
+var litter = new Uint8Array(W * H); // forest floor: 0 none, 1 leaf, 2 leaf, 3 stick
+var stumps = new Uint8Array(W * H); // rare old stumps
 var seed = 20260906;
 var score = 0, eatCd = 0;
 var playerA = 1, wasHiding = false;
@@ -291,7 +292,7 @@ function generate(s) {
   }
 
   // Water is solid; everything else reset
-  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0);
+  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0); stumps.fill(0);
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var i0 = idx(x, y);
@@ -399,6 +400,34 @@ function generate(s) {
     }
   }
 
+  // A couple of old stumps on the forest floor (rare)
+  var stumpsWanted = 12, stumpTries = 0;
+  while (stumpsWanted > 0 && stumpTries < 500) {
+    stumpTries++;
+    var qx = (rand() * W) | 0, qy = (rand() * H) | 0;
+    var qi = idx(qx, qy);
+    if (biome[qi] !== GRASS || trees[qi] || bushes[qi] || stumps[qi]) continue;
+    var qdx = qx - spawn.x, qdy = qy - spawn.y;
+    if (qdx * qdx + qdy * qdy < 64) continue;
+    if (fbm(qx * 0.03 + 300, qy * 0.03 + 300, 3) <= 0.54) continue;
+    var clear = true;
+    for (var sy2 = qy - 5; sy2 <= qy + 5 && clear; sy2++) {
+      for (var sx2 = qx - 5; sx2 <= qx + 5 && clear; sx2++) {
+        if (!inBounds(sx2, sy2)) continue;
+        var sk = idx(sx2, sy2);
+        if (!trees[sk] && !stumps[sk]) continue;
+        var ddx = (qx - sx2) * TILE, ddy = (qy - sy2) * TILE;
+        var d2 = ddx * ddx + ddy * ddy;
+        if (trees[sk] && d2 < 70 * 70) clear = false;
+        if (stumps[sk] && d2 < 160 * 160) clear = false;
+      }
+    }
+    if (!clear) continue;
+    stumps[qi] = 1;
+    solid[qi] = 1;
+    stumpsWanted--;
+  }
+
   buildMinimap();
   return spawn;
 }
@@ -417,6 +446,7 @@ function buildMinimap() {
       else if (biome[i] === WATER) { r = 52; g = 152; b = 219; }
       else if (biome[i] === SAND) { r = 244; g = 226; b = 133; }
       else if (trees[i]) { r = 20; g = 90; b = 40; }
+      else if (stumps[i]) { r = 122; g = 90; b = 60; }
       img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
     }
   }
@@ -503,10 +533,11 @@ function hitsSolid(px, py) {
       if (!inBounds(tx, ty)) return true;
       var ti = idx(tx, ty);
       if (solid[ti]) {
-        if (trees[ti]) {
-          // only the trunk is solid — you can slip under the leaves
+        if (trees[ti] || stumps[ti]) {
+          // only the trunk / stump core is solid — you can slip under leaves
           var tcx = tx * TILE + TILE / 2, tcy = ty * TILE + TILE / 2;
-          var tdx = px - tcx, tdy = py - tcy, trr = r + 7 * treeScale(tx, ty);
+          var trad = trees[ti] ? 7 * treeScale(tx, ty) : 7;
+          var tdx = px - tcx, tdy = py - tcy, trr = r + trad;
           if (tdx * tdx + tdy * tdy < trr * trr) return true;
         } else {
           // circle vs tile rect
@@ -677,6 +708,28 @@ function drawBush(sx, sy, tx, ty, n) {
     ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill(); ctx.stroke();
   }
 }
+function drawStump(sx, sy, tx, ty) {
+  // Old stump seen from above: bark ring around wood with growth rings
+  var sc = 0.9 + hash2(tx, ty, 111) * 0.2;
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 9 * sc, 10 * sc, 4 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#6b4a2b';
+  ctx.strokeStyle = '#4a2f18';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(sx, sy, 11 * sc, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#c9a06a';
+  ctx.beginPath(); ctx.arc(sx, sy, 7.5 * sc, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#a37c4e';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(sx, sy, 5 * sc, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx, sy, 2.8 * sc, 0, 7); ctx.stroke();
+  var ca = hash2(tx, ty, 113) * Math.PI * 2;
+  ctx.strokeStyle = '#6b4a2b';
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(sx + Math.cos(ca) * 7 * sc, sy + Math.sin(ca) * 7 * sc);
+  ctx.stroke();
+}
 function drawPlayer(sx, sy, t) {
   // Small round explorer (smaller than a tree); fades when hiding
   ctx.globalAlpha = playerA;
@@ -786,7 +839,7 @@ function render(t, rdt) {
   for (y = y0; y <= y1; y++) {
     for (x = x0; x <= x1; x++) {
       var j = idx(x, y);
-      if (bushes[j]) drawables.push([y * TILE + 12, x, y]);
+      if (bushes[j] || stumps[j]) drawables.push([y * TILE + 12, x, y]);
     }
   }
   drawables.sort(function (a, b2) { return a[0] - b2[0]; });
@@ -796,7 +849,9 @@ function render(t, rdt) {
     var ox = drawables[d][1] * TILE + TILE / 2;
     var oyy = drawables[d][2] * TILE + TILE / 2;
     var btx = drawables[d][1], bty = drawables[d][2];
-    drawBush(ox, oyy, btx, bty, berryN[idx(btx, bty)]);
+    var bti2 = idx(btx, bty);
+    if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
+    else drawBush(ox, oyy, btx, bty, berryN[bti2]);
   }
   if (!drewPlayer) drawPlayer(px, py, t);
 
