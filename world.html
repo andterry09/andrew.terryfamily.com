@@ -263,6 +263,38 @@ function generate(s) {
     stack.push([qx2, qy2 + 1]); stack.push([qx2, qy2 - 1]);
   }
 
+  // Remove tiny odd ponds (keep real lakes, rivers, ocean)
+  var seen = new Uint8Array(W * H);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var li = idx(x, y);
+      if (biome[li] !== WATER || seen[li]) continue;
+      var region = [];
+      var q = [[x, y]];
+      seen[li] = 1;
+      while (q.length) {
+        var c = q.pop();
+        region.push(c);
+        var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (var di = 0; di < 4; di++) {
+          var nx = c[0] + dirs[di][0], ny = c[1] + dirs[di][1];
+          if (!inBounds(nx, ny)) continue;
+          var ni = idx(nx, ny);
+          if (biome[ni] !== WATER || seen[ni]) continue;
+          seen[ni] = 1;
+          q.push([nx, ny]);
+        }
+      }
+      if (region.length < 25) {
+        for (var ri = 0; ri < region.length; ri++) {
+          var gi = idx(region[ri][0], region[ri][1]);
+          biome[gi] = GRASS;
+          elev[gi] = WATER_LEVEL + 0.06;
+        }
+      }
+    }
+  }
+
   // Spawn: nearest grass to center
   var spawn = { x: W >> 1, y: H >> 1 };
   outer:
