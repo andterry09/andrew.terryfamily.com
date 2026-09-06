@@ -42,17 +42,30 @@
       position: relative;
       text-align: center;
     }
-    .page-head {
-      position: relative;
-      z-index: 2;
+    .topnav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 22px;
+      background: rgba(20, 28, 38, 0.95);
+      box-shadow: 0 2px 12px #0008;
+    }
+    .topnav .mini-brand {
+      color: #ffd700;
+      font-size: 1.3rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-decoration: none;
+      white-space: nowrap;
+      text-shadow: 0 2px 8px #0008;
     }
     #search {
-      position: fixed;
-      top: 14px;
-      left: 22px;
-      z-index: 100;
+      flex: 1;
       width: 220px;
-      max-width: 60vw;
+      max-width: 320px;
       padding: 10px 14px;
       font-size: 1rem;
       font-family: inherit;
@@ -80,13 +93,8 @@
       position: relative;
     }
     @media (max-width: 700px) {
-      #search {
-        top: 10px;
-        left: 12px;
-        width: 160px;
-        font-size: 0.9rem;
-        padding: 8px 10px;
-      }
+      .topnav { padding: 8px 12px; }
+      #search { font-size: 0.9rem; padding: 8px 10px; }
     }
     .games-list {
       display: flex;
@@ -196,10 +204,11 @@
   <!-- <meta name="google-site-verification" content="YOUR_GOOGLE_VERIFICATION_CODE"> -->
 </head>
 <body>
-  <div class="page-head">
+  <div class="topnav">
+    <a class="mini-brand" href="index.html">Gamli</a>
     <input id="search" type="search" placeholder="🔍 Search games..." autocomplete="off" aria-label="Search games">
-    <h1>Gamli</h1>
   </div>
+  <h1>Gamli</h1>
   <div class="games-list">
     <div class="game-card">
       <img class="game-thumb" src="thumbs/square.svg" alt="Square Clicker logo">
@@ -289,17 +298,6 @@
       });
       noResults.style.display = visible ? 'none' : 'block';
     });
-
-    // Hide the pinned search bar while scrolling down so games never
-    // slide under it; show it again when scrolling up or while typing.
-    var lastY = window.scrollY;
-    window.addEventListener('scroll', function () {
-      var y = window.scrollY;
-      var hide = y > lastY && y > 120 && document.activeElement !== searchInput;
-      searchInput.style.transform = hide ? 'translateY(-80px)' : '';
-      searchInput.style.opacity = hide ? '0' : '';
-      lastY = y;
-    }, { passive: true });
   </script>
   <!-- Google Analytics (optional, for tracking) -->
   <!--
