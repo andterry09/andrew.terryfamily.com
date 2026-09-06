@@ -52,6 +52,19 @@
     cursor: pointer;
   }
   #new-world:hover { background: rgba(0, 0, 0, 0.75); }
+  #hidden-badge {
+    display: none;
+    position: fixed;
+    top: 150px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    pointer-events: none;
+  }
   #help {
     position: fixed;
     bottom: 12px;
@@ -76,6 +89,7 @@
   <div id="berries">🫐 Berries: 0</div>
 </div>
 <button id="new-world" type="button">🎲 New World</button>
+<div id="hidden-badge">🤫 Hidden!</div>
 <div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
 <script>
 'use strict';
@@ -151,6 +165,7 @@ var berryN = new Uint8Array(W * H);   // berries currently on a bush (0-3)
 var berryT = new Float32Array(W * H); // regrow timer per bush
 var seed = 20260906;
 var score = 0, eatCd = 0;
+var playerA = 1, wasHiding = false;
 var treeA = new Float32Array(W * H).fill(1); // canopy fade per tree
 var trunkA = new Float32Array(W * H); // trunk shows only when under the tree
 
@@ -448,6 +463,7 @@ player.y = (spawnTile.y + 0.5) * TILE;
 var cam = { x: 0, y: 0 };
 var coordsEl = document.getElementById('coords');
 var berriesEl = document.getElementById('berries');
+var hiddenEl = document.getElementById('hidden-badge');
 document.getElementById('new-world').addEventListener('click', function () {
   spawnTile = generate((Math.random() * 1e9) | 0);
   player.x = (spawnTile.x + 0.5) * TILE;
@@ -537,6 +553,24 @@ function update(dt) {
   var viewW = vw / ZOOM, viewH = vh / ZOOM;
   cam.x = Math.max(0, Math.min(WORLD_PX - viewW, player.x - viewW / 2));
   cam.y = Math.max(0, Math.min(WORLD_PY - viewH, player.y - viewH / 2));
+
+  // Hiding: all the way under a canopy (hugging the trunk) conceals you
+  var hiding = false;
+  var htx = Math.floor(player.x / TILE), hty = Math.floor(player.y / TILE);
+  for (var hy = hty - 1; hy <= hty + 1 && !hiding; hy++) {
+    for (var hx = htx - 1; hx <= htx + 1; hx++) {
+      if (!inBounds(hx, hy) || !trees[idx(hx, hy)]) continue;
+      var hsc = treeScale(hx, hy);
+      var hdx = player.x - (hx + 0.5) * TILE, hdy = player.y - (hy + 0.5) * TILE;
+      var hr = 16 + 7 * hsc;
+      if (hdx * hdx + hdy * hdy < hr * hr) { hiding = true; break; }
+    }
+  }
+  playerA += ((hiding ? 0.15 : 1) - playerA) * Math.min(1, dt * 8);
+  if (hiding !== wasHiding) {
+    wasHiding = hiding;
+    hiddenEl.style.display = hiding ? 'block' : 'none';
+  }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
 }
 
@@ -602,7 +636,8 @@ function drawBush(sx, sy, v, n) {
   }
 }
 function drawPlayer(sx, sy, t) {
-  // Small round explorer (smaller than a tree)
+  // Small round explorer (smaller than a tree); fades when hiding
+  ctx.globalAlpha = playerA;
   var bob = Math.sin(t / 130) * 1.2;
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath(); ctx.ellipse(sx, sy + 9, 8, 3.5, 0, 0, 7); ctx.fill();
@@ -619,6 +654,7 @@ function drawPlayer(sx, sy, t) {
   ctx.fillStyle = '#10233f';
   ctx.beginPath(); ctx.arc(cx + ex * 3.6 + player.fx, cy + ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(cx - ex * 3.6 + player.fx, cy - ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1;
 }
 
 function render(t, rdt) {
