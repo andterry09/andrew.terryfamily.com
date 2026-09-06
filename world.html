@@ -885,6 +885,7 @@ function drawBush(sx, sy, tx, ty, n, alpha) {
   if (hash2(tx, ty, 93) < 0.5) puff(3 + j(94), 6 + j(95), 6);
   ctx.fillStyle = 'rgba(255,255,255,0.3)';
   ctx.beginPath(); ctx.arc(sx - 3 * sc, sy - 6 * sc, 3 * sc, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1; // berries stay fully visible even when the bush fades
   ctx.fillStyle = '#e1306c';
   ctx.strokeStyle = '#a3123f';
   ctx.lineWidth = 1.5;
