@@ -765,7 +765,7 @@ function render(t, rdt) {
         } else if (litter[i]) {
           // fallen leaf
           var la = hash2(x, y, 106) * Math.PI;
-          ctx.fillStyle = litter[i] === 1 ? '#d98e2b' : '#b8452b';
+          ctx.fillStyle = litter[i] === 1 ? '#6fae3f' : '#3c8c3f';
           ctx.beginPath();
           ctx.ellipse(sx + 7 + hash2(x, y, 103) * 18, sy + 7 + hash2(x, y, 104) * 18, 4.5, 2.8, la, 0, 7);
           ctx.fill();
