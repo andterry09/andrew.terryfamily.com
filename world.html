@@ -170,8 +170,7 @@ var shells = new Uint8Array(W * H); // shells on ocean beaches: 0 none, 1 pink, 
 var crabHoles = []; // beach crab holes: {x,y,state,timer,cx,cy,tx,ty,pause,heading}
 var noBush = new Uint8Array(W * H); // keep bushes clear of logs/stumps
 var open = new Uint8Array(W * H); // open field: grass with no trees nearby
-var logs = new Uint8Array(W * H); // fallen leafless logs
-var mushN = new Uint8Array(W * H); // mushrooms on a log (0-3)
+var mushN = new Uint8Array(W * H); // mushrooms on a stump (0-3)
 var mushT = new Float32Array(W * H); // mushroom regrow timer
 var mushScore = 0;
 var seed = 20260906;
@@ -333,7 +332,7 @@ function generate(s) {
   }
 
   // Water is solid; everything else reset
-  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0); stumps.fill(0); logs.fill(0); mushN.fill(0); mushT.fill(0); open.fill(0); noBush.fill(0); shells.fill(0);
+  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0); stumps.fill(0); mushN.fill(0); mushT.fill(0); open.fill(0); noBush.fill(0); shells.fill(0);
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var i0 = idx(x, y);
@@ -457,14 +456,14 @@ function generate(s) {
       for (var sx2 = qx - 5; sx2 <= qx + 5 && clear; sx2++) {
         if (!inBounds(sx2, sy2)) continue;
         var sk = idx(sx2, sy2);
-        if (!trees[sk] && !stumps[sk] && !logs[sk]) continue;
+        if (!trees[sk] && !stumps[sk]) continue;
         var ddx = (qx - sx2) * TILE, ddy = (qy - sy2) * TILE;
         var d2 = ddx * ddx + ddy * ddy;
         if (trees[sk]) {
           nearTree = true;
           if (d2 < 70 * 70) clear = false;
         }
-        if ((stumps[sk] || logs[sk]) && d2 < 160 * 160) clear = false;
+        if (stumps[sk] && d2 < 160 * 160) clear = false;
       }
     }
     if (!clear || !nearTree) continue;
@@ -474,46 +473,12 @@ function generate(s) {
     stumpsWanted--;
   }
 
-  // A few fallen-over leafless trees (logs) with edible side mushrooms.
-  // Logs keep clear space around themselves: they never touch trees or bushes.
-  var logsWanted = 20, logTries = 0;
-  while (logsWanted > 0 && logTries < 4000) {
-    logTries++;
-    var fx = (rand() * W) | 0, fy = (rand() * H) | 0;
-    var fi = idx(fx, fy);
-    if (biome[fi] !== GRASS || trees[fi] || bushes[fi] || stumps[fi] || logs[fi]) continue;
-    var fdx = fx - spawn.x, fdy = fy - spawn.y;
-    if (fdx * fdx + fdy * fdy < 64) continue;
-    if (fbm(fx * 0.03 + 300, fy * 0.03 + 300, 3) <= 0.54) continue;
-    var lsc0 = logScale(fx, fy);
-    var fok = true;
-    for (var ly3 = fy - 6; ly3 <= fy + 6 && fok; ly3++) {
-      for (var lx3 = fx - 6; lx3 <= fx + 6 && fok; lx3++) {
-        if (!inBounds(lx3, ly3)) continue;
-        if (lx3 === fx && ly3 === fy) continue;
-        var lk = idx(lx3, ly3);
-        if (!trees[lk] && !bushes[lk] && !stumps[lk] && !logs[lk]) continue;
-        var edx = (fx - lx3) * TILE, edy = (fy - ly3) * TILE;
-        var ed2 = edx * edx + edy * edy;
-        if (trees[lk] && ed2 < Math.pow(20 * lsc0 + 24 * treeScale(lx3, ly3) + 6, 2)) fok = false;
-        else if ((stumps[lk] || logs[lk]) && ed2 < 170 * 170) fok = false;
-      }
-    }
-    if (!fok) continue;
-    logs[fi] = 1;
-    solid[fi] = 1;
-    mushN[fi] = 3;
-    mushT[fi] = 0;
-    logsWanted--;
-  }
-
-  // Keep bushes clear of logs and stumps so nothing visually overlaps them
+  // Keep bushes clear of stumps so nothing visually overlaps them
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var zi = idx(x, y);
       var zrad = 0;
-      if (logs[zi]) zrad = 23 * logScale(x, y) + 50;
-      else if (stumps[zi]) zrad = 70;
+      if (stumps[zi]) zrad = 70;
       if (!zrad) continue;
       var zpx = (x + 0.5) * TILE, zpy = (y + 0.5) * TILE;
       var zxa = Math.max(0, Math.floor((zpx - zrad) / TILE)), zxb = Math.min(W - 1, Math.floor((zpx + zrad) / TILE));
@@ -615,7 +580,6 @@ function buildMinimap() {
       else if (biome[i] === SAND) { r = 244; g = 226; b = 133; }
       else if (trees[i]) { r = 20; g = 90; b = 40; }
       else if (stumps[i]) { r = 122; g = 90; b = 60; }
-      else if (logs[i]) { r = 110; g = 80; b = 50; }
       img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
     }
   }
@@ -699,19 +663,8 @@ function bushScale(tx, ty) {
   return 1.5 + hash2(tx, ty, 83) * 0.7; // forests: 1.5 - 2.2x
 }
 function stumpScale(tx, ty) { return 1.2 + hash2(tx, ty, 111) * 0.3; } // 1.2 - 1.5x
-function logScale(tx, ty) { return 1.7 + hash2(tx, ty, 131) * 0.8; } // 1.7x - 2.5x
 function mushScale(tx, ty, k) { return 0.8 + hash2(tx + k * 13, ty + k * 29, 133) * 1.0; } // 0.8x - 1.8x
-function mushPos(tx, ty, k) {
-  var sc = logScale(tx, ty);
-  var cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
-  var horiz = hash2(tx, ty, 121) < 0.5;
-  // each mushroom picks its own random flank so they ring the log
-  var side = hash2(tx + k * 17, ty + k * 23, 153) < 0.5 ? 1 : -1;
-  var a = (k - 1) * 12 * sc + (hash2(tx + k * 5, ty + k * 31, 157) - 0.5) * 8;
-  return horiz ? { x: cx + a, y: cy + side * 11 * sc } : { x: cx + side * 11 * sc, y: cy + a };
-}
 function shroomPos(tx, ty, k) {
-  if (logs[idx(tx, ty)]) return mushPos(tx, ty, k);
   // stump mushrooms grow in a cluster on one random side
   var cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
   var a0 = hash2(tx, ty, 137) * Math.PI * 2;
@@ -737,9 +690,8 @@ function crabDart(ch) {
 function hitsSolid(px, py) {
   var r = player.r - 3;
   if (px - r < 0 || py - r < 0 || px + r > WORLD_PX || py + r > WORLD_PY) return true;
-  var m = 48; // margin so oversized objects (big logs) can't be bypassed
-  var x0 = Math.floor((px - r - m) / TILE), x1 = Math.floor((px + r + m) / TILE);
-  var y0 = Math.floor((py - r - m) / TILE), y1 = Math.floor((py + r + m) / TILE);
+  var x0 = Math.floor((px - r) / TILE), x1 = Math.floor((px + r) / TILE);
+  var y0 = Math.floor((py - r) / TILE), y1 = Math.floor((py + r) / TILE);
   for (var ty = y0; ty <= y1; ty++) {
     for (var tx = x0; tx <= x1; tx++) {
       if (!inBounds(tx, ty)) continue;
@@ -751,19 +703,6 @@ function hitsSolid(px, py) {
           var trad = trees[ti] ? 7 * treeScale(tx, ty) : 7 * stumpScale(tx, ty);
           var tdx = px - tcx, tdy = py - tcy, trr = r + trad;
           if (tdx * tdx + tdy * tdy < trr * trr) return true;
-        } else if (logs[ti]) {
-          // fallen log: capsule (segment) collision, scaled with the log
-          var lsc = logScale(tx, ty);
-          var lhoriz = hash2(tx, ty, 121) < 0.5;
-          var lcx = tx * TILE + TILE / 2, lcy = ty * TILE + TILE / 2;
-          var lex = lhoriz ? 15 * lsc : 0, ley = lhoriz ? 0 : 15 * lsc;
-          var lvx = 2 * lex, lvy = 2 * ley;
-          var lwx = px - (lcx - lex), lwy = py - (lcy - ley);
-          var lc1 = lwx * lvx + lwy * lvy;
-          var lc2 = lvx * lvx + lvy * lvy;
-          var ltt = lc2 > 0 ? Math.max(0, Math.min(1, lc1 / lc2)) : 0;
-          var ldx = lwx - ltt * lvx, ldy = lwy - ltt * lvy;
-          if (ldx * ldx + ldy * ldy < (r + 8 * lsc) * (r + 8 * lsc)) return true;
         } else {
           // circle vs tile rect
           var nx = Math.max(tx * TILE, Math.min(px, tx * TILE + TILE));
@@ -799,23 +738,6 @@ function resolveSolids() {
             ov = r + trad - d;
             if (d > 0.001) { ox = dx / d * ov; oy = dy / d * ov; }
             else { ox = ov; oy = 0; }
-          }
-        } else if (logs[ti]) {
-          var lsc = logScale(tx, ty);
-          var lh = hash2(tx, ty, 121) < 0.5;
-          var lx = tx * TILE + TILE / 2, ly = ty * TILE + TILE / 2;
-          var ex = lh ? 15 * lsc : 0, ey = lh ? 0 : 15 * lsc;
-          var vx = 2 * ex, vy = 2 * ey;
-          var wx = player.x - (lx - ex), wy = player.y - (ly - ey);
-          var c2 = vx * vx + vy * vy;
-          var tt = c2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / c2)) : 0;
-          var qx = lx - ex + tt * vx, qy = ly - ey + tt * vy;
-          var qdx = player.x - qx, qdy = player.y - qy;
-          var qd = Math.hypot(qdx, qdy);
-          if (qd < r + 8 * lsc) {
-            ov = r + 8 * lsc - qd;
-            if (qd > 0.001) { ox = qdx / qd * ov; oy = qdy / qd * ov; }
-            else { ox = 0; oy = ov; }
           }
         } else {
           var rx = tx * TILE, ry = ty * TILE;
@@ -878,7 +800,7 @@ function update(dt) {
       berryT[bi] += dt;
       if (berryT[bi] > 20) { berryN[bi]++; berryT[bi] = 0; }
     }
-    if ((logs[bi] || stumps[bi]) && mushN[bi] < 3) {
+    if (stumps[bi] && mushN[bi] < 3) {
       mushT[bi] += dt;
       if (mushT[bi] > 20) { mushN[bi]++; mushT[bi] = 0; }
     }
@@ -912,7 +834,7 @@ function update(dt) {
       for (var mx = ptx - 1; mx <= ptx + 1; mx++) {
         if (!inBounds(mx, my)) continue;
         var mi = idx(mx, my);
-        if ((!logs[mi] && !stumps[mi]) || !mushN[mi]) continue;
+        if (!stumps[mi] || !mushN[mi]) continue;
         for (var mk = 0; mk < mushN[mi]; mk++) {
           var mp = shroomPos(mx, my, mk);
           var mdx = player.x - mp.x, mdy = player.y - mp.y;
@@ -1132,51 +1054,6 @@ function drawShroom(x, y, s) {
   ctx.beginPath(); ctx.arc(x + 1.4 * s, y - 2.2 * s, 0.8 * s, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(x + 0.4 * s, y + 0.2 * s, 0.7 * s, 0, 7); ctx.fill();
 }
-function drawLog(sx, sy, tx, ty) {
-  // Fallen leafless tree lying on its side, mushrooms along one flank.
-  // Every log gets its own size (1x - 1.5x) and bark tint; some grow moss.
-  var horiz = hash2(tx, ty, 121) < 0.5;
-  var sc = logScale(tx, ty);
-  var L = 23 * sc, R = 8 * sc;
-  var barkD = '#4a2f18', barkL = '#7a5230';
-  var bv = hash2(tx, ty, 139);
-  if (bv < 0.33) { barkD = '#4a4038'; barkL = '#7a6a58'; }
-  else if (bv < 0.66) { barkD = '#5a2f1a'; barkL = '#8a5a30'; }
-  function P(ax, ay) { return horiz ? [sx + ax, sy + ay] : [sx + ay, sy + ax]; }
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  ctx.beginPath(); ctx.ellipse(sx, sy + R, L, 4, 0, 0, 7); ctx.fill();
-  var a = P(-L, 0), b = P(L, 0);
-  ctx.strokeStyle = barkD;
-  ctx.lineWidth = R * 2 + 3;
-  ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
-  ctx.strokeStyle = barkL;
-  ctx.lineWidth = R * 2 - 2;
-  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
-  var ends = [P(-L, 0), P(L, 0)];
-  for (var e = 0; e < 2; e++) {
-    ctx.fillStyle = '#c9a06a';
-    ctx.strokeStyle = '#8a5a33';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(ends[e][0], ends[e][1], R - 1.5, 0, 7); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = '#a37c4e';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.arc(ends[e][0], ends[e][1], (R - 1.5) * 0.55, 0, 7); ctx.stroke();
-  }
-  // snapped branch nub on a random side
-  var side = hash2(tx, ty, 122) < 0.5 ? 1 : -1;
-  var off = (hash2(tx, ty, 123) - 0.5) * 20 * sc;
-  var n0 = horiz ? [sx + off, sy - side * R] : [sx - side * R, sy + off];
-  var n1 = horiz ? [sx + off, sy - side * (R + 7)] : [sx - side * (R + 7), sy + off];
-  ctx.strokeStyle = barkD;
-  ctx.lineWidth = 5;
-  ctx.beginPath(); ctx.moveTo(n0[0], n0[1]); ctx.lineTo(n1[0], n1[1]); ctx.stroke();
-  var mn = mushN[idx(tx, ty)];
-  for (var k = 0; k < mn; k++) {
-    var mp = mushPos(tx, ty, k);
-    drawShroom(mp.x, mp.y, mushScale(tx, ty, k)); // world coords, zoom transform is active
-  }
-}
 function drawCrab(h, t) {
   var wig = Math.sin(t / 90) * 1.2;
   ctx.save();
@@ -1371,7 +1248,7 @@ function render(t, rdt) {
   for (y = y0; y <= y1; y++) {
     for (x = x0; x <= x1; x++) {
       var j = idx(x, y);
-      if (bushes[j] || stumps[j] || logs[j]) drawables.push([y * TILE + 12, x, y]);
+      if (bushes[j] || stumps[j]) drawables.push([y * TILE + 12, x, y]);
     }
   }
   for (var hi2 = 0; hi2 < crabHoles.length; hi2++) {
@@ -1390,7 +1267,6 @@ function render(t, rdt) {
     var bti2 = idx(btx, bty);
     if (btx >= 1000) drawCrab(crabHoles[btx - 1000], t);
     else if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
-    else if (logs[bti2]) drawLog(ox, oyy, btx, bty);
     else {
       var bsc = bushScale(btx, bty);
       var bdx = player.x - ox, bdy = player.y - oyy;
