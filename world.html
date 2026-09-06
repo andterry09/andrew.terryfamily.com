@@ -285,11 +285,11 @@ function generate(s) {
       var sdx = x - spawn.x, sdy = y - spawn.y;
       if (sdx * sdx + sdy * sdy < 25) continue;
       var forest = fbm(x * 0.045 + 300, y * 0.045 + 300, 3);
-      if (forest > 0.57 && hash2(x, y, seed + 5) < 0.55) {
-        // keep some space between trunks so forests stay walkable
+      if (forest > 0.55 && hash2(x, y, seed + 5) < 0.55) {
+        // keep plenty of space between trunks so canopies never overlap
         var crowded = false;
-        for (var ny2 = y - 1; ny2 <= y + 1 && !crowded; ny2++) {
-          for (var nx2 = x - 1; nx2 <= x + 1 && !crowded; nx2++) {
+        for (var ny2 = y - 2; ny2 <= y + 2 && !crowded; ny2++) {
+          for (var nx2 = x - 2; nx2 <= x + 2 && !crowded; nx2++) {
             if (nx2 === x && ny2 === y) continue;
             if (nx2 < 0 || ny2 < 0 || nx2 >= W || ny2 >= H) continue;
             if (trees[idx(nx2, ny2)]) crowded = true;
