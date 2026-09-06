@@ -47,9 +47,10 @@
       z-index: 2;
     }
     #search {
-      position: absolute;
-      top: 44px;
+      position: fixed;
+      top: 14px;
       left: 22px;
+      z-index: 100;
       width: 220px;
       max-width: 60vw;
       padding: 10px 14px;
@@ -79,9 +80,11 @@
     }
     @media (max-width: 700px) {
       #search {
-        position: static;
-        display: block;
-        margin: 16px auto 0 auto;
+        top: 10px;
+        left: 12px;
+        width: 160px;
+        font-size: 0.9rem;
+        padding: 8px 10px;
       }
     }
     .games-list {
