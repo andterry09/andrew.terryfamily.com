@@ -291,7 +291,7 @@ function generate(s) {
   var BC = 64;
   var BW = Math.ceil(WORLD_PX / BC), BH = Math.ceil(WORLD_PY / BC);
   var buckets = new Array(BW * BH);
-  function treeOK(px, py, sc) {
+  function treeOK(px, py, sc, cozy) {
     var xa = Math.max(0, Math.floor((px - 85) / BC)), xb = Math.min(BW - 1, Math.floor((px + 85) / BC));
     var ya = Math.max(0, Math.floor((py - 85) / BC)), yb = Math.min(BH - 1, Math.floor((py + 85) / BC));
     for (var cy = ya; cy <= yb; cy++) {
@@ -301,7 +301,7 @@ function generate(s) {
         for (var k = 0; k < arr.length; k++) {
           var j = arr[k];
           var dx = px - placedX[j], dy = py - placedY[j];
-          var need = 27.5 * (sc + placedS[j]) + 4;
+          var need = cozy ? 34 : 27.5 * (sc + placedS[j]) + 4;
           if (dx * dx + dy * dy < need * need) return false;
         }
       }
@@ -328,7 +328,8 @@ function generate(s) {
     var cxx = cix % W, cyy = (cix / W) | 0;
     var csc = treeScale(cxx, cyy);
     var cxp = (cxx + 0.5) * TILE, cyp = (cyy + 0.5) * TILE;
-    if (!treeOK(cxp, cyp, csc)) continue;
+    var cozy = rand() < 0.08; // a few trees may snuggle (canopies touch, trunks don't)
+    if (!treeOK(cxp, cyp, csc, cozy)) continue;
     var id = placedX.length;
     placedX.push(cxp); placedY.push(cyp); placedS.push(csc);
     var bix = Math.min(BH - 1, Math.floor(cyp / BC)) * BW + Math.min(BW - 1, Math.floor(cxp / BC));
