@@ -274,35 +274,82 @@ function generate(s) {
     }
   }
 
-  // Trees (grassy forests) + bushes, keeping spawn clearing
-  trees.fill(0); bushes.fill(0); solid.fill(0);
+  // Water is solid; everything else reset
+  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i0 = idx(x, y);
+      if (biome[i0] === WATER || biome[i0] === OCEAN) solid[i0] = 1;
+    }
+  }
+
+  // Trees: random scatter inside forest areas (natural, not grid-like).
+  // Candidates are shuffled and each tree keeps room for its own canopy,
+  // so canopies never sit inside each other (small trees may cozy up,
+  // big trees stand apart).
+  var placedX = [], placedY = [], placedS = [];
+  var BC = 64;
+  var BW = Math.ceil(WORLD_PX / BC), BH = Math.ceil(WORLD_PY / BC);
+  var buckets = new Array(BW * BH);
+  function treeOK(px, py, sc) {
+    var xa = Math.max(0, Math.floor((px - 85) / BC)), xb = Math.min(BW - 1, Math.floor((px + 85) / BC));
+    var ya = Math.max(0, Math.floor((py - 85) / BC)), yb = Math.min(BH - 1, Math.floor((py + 85) / BC));
+    for (var cy = ya; cy <= yb; cy++) {
+      for (var cx = xa; cx <= xb; cx++) {
+        var arr = buckets[cy * BW + cx];
+        if (!arr) continue;
+        for (var k = 0; k < arr.length; k++) {
+          var j = arr[k];
+          var dx = px - placedX[j], dy = py - placedY[j];
+          var need = 27.5 * (sc + placedS[j]) + 4;
+          if (dx * dx + dy * dy < need * need) return false;
+        }
+      }
+    }
+    return true;
+  }
+  var cands = [];
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var i3 = idx(x, y);
-      var bb = biome[i3];
-      if (bb === WATER || bb === OCEAN) { solid[i3] = 1; continue; }
-      if (bb !== GRASS) continue;
+      if (biome[i3] !== GRASS) continue;
       var sdx = x - spawn.x, sdy = y - spawn.y;
-      if (sdx * sdx + sdy * sdy < 25) continue;
-      var forest = fbm(x * 0.045 + 300, y * 0.045 + 300, 3);
-      if (forest > 0.55 && hash2(x, y, seed + 5) < 0.55) {
-        // keep plenty of space between trunks so canopies never overlap
-        var crowded = false;
-        for (var ny2 = y - 2; ny2 <= y + 2 && !crowded; ny2++) {
-          for (var nx2 = x - 2; nx2 <= x + 2 && !crowded; nx2++) {
-            if (nx2 === x && ny2 === y) continue;
-            if (nx2 < 0 || ny2 < 0 || nx2 >= W || ny2 >= H) continue;
-            if (trees[idx(nx2, ny2)]) crowded = true;
-          }
-        }
-        if (!crowded) {
-          trees[i3] = 1;
-          solid[i3] = 1;
-        }
-      } else if (hash2(x, y, seed + 9) < 0.07) {
-        bushes[i3] = 1;
-        berryN[i3] = 3;
-        berryT[i3] = 0;
+      if (sdx * sdx + sdy * sdy < 36) continue;
+      if (fbm(x * 0.03 + 300, y * 0.03 + 300, 3) > 0.54) cands.push(i3);
+    }
+  }
+  for (var si = cands.length - 1; si > 0; si--) {
+    var sj = (rand() * (si + 1)) | 0;
+    var tmp = cands[si]; cands[si] = cands[sj]; cands[sj] = tmp;
+  }
+  var placed = 0;
+  for (var ci = 0; ci < cands.length && placed < 1000; ci++) {
+    var cix = cands[ci];
+    var cxx = cix % W, cyy = (cix / W) | 0;
+    var csc = treeScale(cxx, cyy);
+    var cxp = (cxx + 0.5) * TILE, cyp = (cyy + 0.5) * TILE;
+    if (!treeOK(cxp, cyp, csc)) continue;
+    var id = placedX.length;
+    placedX.push(cxp); placedY.push(cyp); placedS.push(csc);
+    var bix = Math.min(BH - 1, Math.floor(cyp / BC)) * BW + Math.min(BW - 1, Math.floor(cxp / BC));
+    if (!buckets[bix]) buckets[bix] = [];
+    buckets[bix].push(id);
+    trees[cix] = 1;
+    solid[cix] = 1;
+    placed++;
+  }
+
+  // Bushes: random scatter on open grass
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i4 = idx(x, y);
+      if (biome[i4] !== GRASS || trees[i4]) continue;
+      var bdx = x - spawn.x, bdy = y - spawn.y;
+      if (bdx * bdx + bdy * bdy < 25) continue;
+      if (hash2(x, y, seed + 9) < 0.07) {
+        bushes[i4] = 1;
+        berryN[i4] = 3;
+        berryT[i4] = 0;
       }
     }
   }
