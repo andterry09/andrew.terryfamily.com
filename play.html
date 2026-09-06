@@ -385,6 +385,28 @@
         try { frame.contentWindow.focus(); } catch (err) {}
       });
 
+      // Lock page scrolling while the game is engaged (hovered or focused).
+      // Arrow keys otherwise "chain" out of the game frame and scroll this page.
+      var playerBox = document.getElementById('player-box');
+      function lockPageScroll() {
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+      }
+      function unlockPageScroll() {
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
+      }
+      playerBox.addEventListener('mouseenter', lockPageScroll);
+      playerBox.addEventListener('mouseleave', function () {
+        if (document.activeElement !== frame) unlockPageScroll();
+      });
+      window.addEventListener('blur', function () {
+        setTimeout(function () {
+          if (document.activeElement === frame) lockPageScroll();
+        }, 0);
+      });
+      window.addEventListener('focus', unlockPageScroll);
+
       var grid = document.getElementById('related-grid');
       Object.keys(GAMES).forEach(function (key) {
         if (key === id) return;
