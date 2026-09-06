@@ -406,8 +406,8 @@ function generate(s) {
   }
 
   // A couple of old stumps on the forest floor (rare)
-  var stumpsWanted = 12, stumpTries = 0;
-  while (stumpsWanted > 0 && stumpTries < 500) {
+  var stumpsWanted = 25, stumpTries = 0;
+  while (stumpsWanted > 0 && stumpTries < 1500) {
     stumpTries++;
     var qx = (rand() * W) | 0, qy = (rand() * H) | 0;
     var qi = idx(qx, qy);
@@ -435,7 +435,7 @@ function generate(s) {
 
   // A few fallen-over leafless trees (logs) with edible side mushrooms.
   // Logs lie near standing trees (they fell from them) but never on trunks.
-  var logsWanted = 9, logTries = 0;
+  var logsWanted = 20, logTries = 0;
   while (logsWanted > 0 && logTries < 2000) {
     logTries++;
     var fx = (rand() * W) | 0, fy = (rand() * H) | 0;
