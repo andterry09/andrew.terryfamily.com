@@ -473,6 +473,7 @@ document.getElementById('new-world').addEventListener('click', function () {
 });
 
 function treeScale(tx, ty) { return 1.5 + hash2(tx, ty, 41) * 0.5; } // 1.5 - 2.0x
+function bushScale(tx, ty) { return 0.75 + hash2(tx, ty, 83) * 0.5; } // 0.75 - 1.25x
 
 function hitsSolid(px, py) {
   var r = player.r - 3;
@@ -618,20 +619,31 @@ function drawTree(sx, sy, tx, ty, leafAlpha, trunkAlpha) {
   }
   ctx.globalAlpha = 1;
 }
-function drawBush(sx, sy, v, n) {
-  // Round mope.io-style berry bush with edible berries
-  ctx.fillStyle = v < 0.5 ? '#2f9e44' : '#37ad4c';
-  ctx.strokeStyle = '#1d6b2c';
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(sx - 6, sy + 3, 8, 0, 7); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.arc(sx + 6, sy + 3, 8, 0, 7); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.arc(sx, sy - 4, 9, 0, 7); ctx.fill(); ctx.stroke();
+function drawBush(sx, sy, tx, ty, n) {
+  // Every bush gets its own size (0.75x - 1.25x) and slight look
+  var sc = bushScale(tx, ty);
+  var pal = (hash2(tx, ty, 85) * 3) | 0;
+  var base = pal === 2 ? '#2a8a3e' : (pal === 1 ? '#37ad4c' : '#2f9e44');
+  var dark = '#1d6b2c';
+  function j(s) { return (hash2(tx, ty, s) - 0.5) * 6; }
+  function puff(dx, dy, r) {
+    ctx.fillStyle = base;
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(sx + dx * sc, sy + dy * sc, r * sc, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  puff(-6 + j(87), 3 + j(88), 8);
+  puff(6 + j(89), 3 + j(90), 8);
+  puff(j(91), -4 + j(92), 9);
+  if (hash2(tx, ty, 93) < 0.5) puff(3 + j(94), 6 + j(95), 6);
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.arc(sx - 3 * sc, sy - 6 * sc, 3 * sc, 0, 7); ctx.fill();
   ctx.fillStyle = '#e1306c';
   ctx.strokeStyle = '#a3123f';
   ctx.lineWidth = 1.5;
   for (var k = 0; k < n; k++) {
-    var a = hash2((sx | 0) + k * 13, (sy | 0) + k * 29, 77) * Math.PI * 2;
-    var bx = sx + Math.cos(a) * 8, by = sy - 1 + Math.sin(a) * 7;
+    var a = hash2(tx + k * 13, ty + k * 29, 77) * Math.PI * 2;
+    var bx = sx + Math.cos(a) * 8 * sc, by = sy - 1 + Math.sin(a) * 7 * sc;
     ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill(); ctx.stroke();
   }
 }
@@ -730,8 +742,8 @@ function render(t, rdt) {
     if (!drewPlayer && player.y < oy) { drawPlayer(px, py, t); drewPlayer = true; }
     var ox = drawables[d][1] * TILE + TILE / 2;
     var oyy = drawables[d][2] * TILE + TILE / 2;
-    var vv = hash2(drawables[d][1], drawables[d][2], 31);
-    drawBush(ox, oyy, vv, berryN[idx(drawables[d][1], drawables[d][2])]);
+    var btx = drawables[d][1], bty = drawables[d][2];
+    drawBush(ox, oyy, btx, bty, berryN[idx(btx, bty)]);
   }
   if (!drewPlayer) drawPlayer(px, py, t);
 
