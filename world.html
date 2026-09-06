@@ -41,7 +41,7 @@
     top: 12px;
     left: 12px;
     z-index: 11;
-    margin-top: 76px;
+    margin-top: 124px;
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.3);
@@ -55,7 +55,7 @@
   #hidden-badge {
     display: none;
     position: fixed;
-    top: 150px;
+    top: 184px;
     left: 12px;
     z-index: 10;
     background: rgba(0, 0, 0, 0.55);
@@ -1078,7 +1078,7 @@ function render(t, rdt) {
       if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
       else if (b === WATER) ctx.fillStyle = shade(C_WATER, v * 12);
       else if (b === SAND) ctx.fillStyle = shade(C_SAND, v * 14);
-      else ctx.fillStyle = shade(C_GRASS, v * 16);
+      else ctx.fillStyle = shade(C_GRASS, (fbm(x * 0.08, y * 0.08, 2) - 0.5) * 44 + v * 5);
       ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
 
       if (b === WATER || b === OCEAN) {
@@ -1163,6 +1163,39 @@ function render(t, rdt) {
           ctx.fillStyle = 'rgba(190,170,100,0.6)';
           ctx.fillRect(sx + hash2(x, y, 28) * 26 + 2, sy + hash2(x, y, 29) * 26 + 2, 3, 3);
         }
+      }
+    }
+  }
+
+  // Soft coasts: rounded blobs over biome seams hide the blocky tile edges.
+  // Sand blobs go down first, water blobs on top, so shorelines curve.
+  for (var pass = 0; pass < 2; pass++) {
+    var wantSand = pass === 0;
+    for (y = y0; y <= y1; y++) {
+      for (x = x0; x <= x1; x++) {
+        var bi2 = idx(x, y);
+        var bb2 = biome[bi2];
+        var isSand = bb2 === SAND;
+        var isWater = bb2 === WATER || bb2 === OCEAN;
+        if (wantSand ? !isSand : !isWater) continue;
+        var edge = false;
+        for (var ey = -1; ey <= 1 && !edge; ey++) {
+          for (var ex = -1; ex <= 1 && !edge; ex++) {
+            if (!ex && !ey) continue;
+            var nx2 = x + ex, ny2 = y + ey;
+            if (!inBounds(nx2, ny2)) continue;
+            var nb = biome[idx(nx2, ny2)];
+            if (wantSand) { if (nb !== SAND) edge = true; }
+            else if (nb !== WATER && nb !== OCEAN) edge = true;
+          }
+        }
+        if (!edge) continue;
+        var vv = hash2(x, y, 21) - 0.5;
+        if (wantSand) ctx.fillStyle = shade(C_SAND, vv * 14);
+        else ctx.fillStyle = shade(bb2 === OCEAN ? C_OCEAN : C_WATER, vv * 12);
+        ctx.beginPath();
+        ctx.arc(x * TILE + TILE / 2 + (hash2(x, y, 191) - 0.5) * 8, y * TILE + TILE / 2 + (hash2(x, y, 193) - 0.5) * 8, TILE * 0.75, 0, 7);
+        ctx.fill();
       }
     }
   }
