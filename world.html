@@ -473,7 +473,7 @@ document.getElementById('new-world').addEventListener('click', function () {
 });
 
 function treeScale(tx, ty) { return 1.5 + hash2(tx, ty, 41) * 0.5; } // 1.5 - 2.0x
-function bushScale(tx, ty) { return 0.75 + hash2(tx, ty, 83) * 0.5; } // 0.75 - 1.25x
+function bushScale(tx, ty) { return 1.4 + hash2(tx, ty, 83) * 0.6; } // 1.4 - 2.0x
 
 function hitsSolid(px, py) {
   var r = player.r - 3;
@@ -565,6 +565,17 @@ function update(dt) {
       var hdx = player.x - (hx + 0.5) * TILE, hdy = player.y - (hy + 0.5) * TILE;
       var hr = 16 + 7 * hsc;
       if (hdx * hdx + hdy * hdy < hr * hr) { hiding = true; break; }
+    }
+  }
+  // Hiding in a bush: fully inside big foliage conceals you too
+  if (!hiding) {
+    for (var by = hty - 1; by <= hty + 1 && !hiding; by++) {
+      for (var bx = htx - 1; bx <= htx + 1; bx++) {
+        if (!inBounds(bx, by) || !bushes[idx(bx, by)]) continue;
+        var bsc = bushScale(bx, by);
+        var bdx = player.x - (bx + 0.5) * TILE, bdy = player.y - (by + 0.5) * TILE;
+        if (Math.hypot(bdx, bdy) < 14 * bsc - player.r) { hiding = true; break; }
+      }
     }
   }
   playerA += ((hiding ? 0.15 : 1) - playerA) * Math.min(1, dt * 8);
