@@ -592,11 +592,13 @@ function shroomPos(tx, ty, k) {
 
 function hitsSolid(px, py) {
   var r = player.r - 3;
-  var x0 = Math.floor((px - r) / TILE), x1 = Math.floor((px + r) / TILE);
-  var y0 = Math.floor((py - r) / TILE), y1 = Math.floor((py + r) / TILE);
+  if (px - r < 0 || py - r < 0 || px + r > WORLD_PX || py + r > WORLD_PY) return true;
+  var m = 36; // margin so oversized objects (big logs) can't be bypassed
+  var x0 = Math.floor((px - r - m) / TILE), x1 = Math.floor((px + r + m) / TILE);
+  var y0 = Math.floor((py - r - m) / TILE), y1 = Math.floor((py + r + m) / TILE);
   for (var ty = y0; ty <= y1; ty++) {
     for (var tx = x0; tx <= x1; tx++) {
-      if (!inBounds(tx, ty)) return true;
+      if (!inBounds(tx, ty)) continue;
       var ti = idx(tx, ty);
       if (solid[ti]) {
         if (trees[ti] || stumps[ti]) {
