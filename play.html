@@ -367,6 +367,24 @@
       }
       document.addEventListener('fullscreenchange', syncFsLabel);
 
+      // Stop arrow keys / space from scrolling this page.
+      // Games run in their own frame and handle these keys themselves.
+      document.addEventListener('keydown', function (e) {
+        var tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+            e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault();
+        } else if ((e.key === ' ' || e.code === 'Space') && tag !== 'BUTTON' && tag !== 'A') {
+          e.preventDefault();
+        }
+      });
+
+      // Give the game keyboard focus on load so its controls work right away.
+      frame.addEventListener('load', function () {
+        try { frame.contentWindow.focus(); } catch (err) {}
+      });
+
       var grid = document.getElementById('related-grid');
       Object.keys(GAMES).forEach(function (key) {
         if (key === id) return;
