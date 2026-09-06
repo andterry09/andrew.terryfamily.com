@@ -163,6 +163,7 @@ var bushes = new Uint8Array(W * H);
 var solid = new Uint8Array(W * H);
 var berryN = new Uint8Array(W * H);   // berries currently on a bush (0-3)
 var berryT = new Float32Array(W * H); // regrow timer per bush
+var litter = new Uint8Array(W * H); // forest floor: 0 none, 1 amber leaf, 2 red leaf, 3 stick
 var seed = 20260906;
 var score = 0, eatCd = 0;
 var playerA = 1, wasHiding = false;
@@ -290,7 +291,7 @@ function generate(s) {
   }
 
   // Water is solid; everything else reset
-  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0);
+  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0);
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var i0 = idx(x, y);
@@ -363,6 +364,24 @@ function generate(s) {
     trees[cix] = 1;
     solid[cix] = 1;
     placed++;
+  }
+
+  // Forest floor: fallen leaves + sticks scattered near trees
+  for (var ly = 0; ly < H; ly++) {
+    for (var lx = 0; lx < W; lx++) {
+      if (!trees[idx(lx, ly)]) continue;
+      for (var oy = -2; oy <= 2; oy++) {
+        for (var ox = -2; ox <= 2; ox++) {
+          var gx = lx + ox, gy = ly + oy;
+          if (!inBounds(gx, gy)) continue;
+          var gi = idx(gx, gy);
+          if (biome[gi] !== GRASS) continue;
+          if (hash2(gx, gy, seed + 101) < 0.38) {
+            litter[gi] = 1 + ((hash2(gx, gy, seed + 102) * 3) | 0); // 1..3
+          }
+        }
+      }
+    }
   }
 
   // Bushes: random scatter on open grass
@@ -727,6 +746,29 @@ function render(t, rdt) {
           ctx.moveTo(gx, gy); ctx.lineTo(gx - 2, gy - 6);
           ctx.moveTo(gx + 5, gy + 1); ctx.lineTo(gx + 7, gy - 5);
           ctx.stroke();
+        }
+        if (litter[i] === 3) {
+          // fallen stick with a tiny twig
+          var sa = hash2(x, y, 105) * Math.PI;
+          var lxs = sx + 7 + hash2(x, y, 103) * 18, lys = sy + 7 + hash2(x, y, 104) * 18;
+          ctx.strokeStyle = '#7a5230';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(lxs - Math.cos(sa) * 6, lys - Math.sin(sa) * 6);
+          ctx.lineTo(lxs + Math.cos(sa) * 6, lys + Math.sin(sa) * 6);
+          ctx.stroke();
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(lxs + 1, lys - 1);
+          ctx.lineTo(lxs + 5, lys - 5);
+          ctx.stroke();
+        } else if (litter[i]) {
+          // fallen leaf
+          var la = hash2(x, y, 106) * Math.PI;
+          ctx.fillStyle = litter[i] === 1 ? '#d98e2b' : '#b8452b';
+          ctx.beginPath();
+          ctx.ellipse(sx + 7 + hash2(x, y, 103) * 18, sy + 7 + hash2(x, y, 104) * 18, 4.5, 2.8, la, 0, 7);
+          ctx.fill();
         }
       } else if (b === SAND) {
         if (hash2(x, y, 27) < 0.4) {
