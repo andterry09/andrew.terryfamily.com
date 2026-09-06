@@ -908,13 +908,34 @@ function update(dt) {
     else if (cdd > 1) {
       var cspeed = ch.state === 'return' ? 170 : 150;
       var cmove = Math.min(cdd, cspeed * dt);
-      ch.cx += cdx / cdd * cmove;
-      ch.cy += cdy / cdd * cmove;
-      var want = Math.atan2(cdy, cdx);
-      var cdh = want - ch.heading;
-      while (cdh > Math.PI) cdh -= Math.PI * 2;
-      while (cdh < -Math.PI) cdh += Math.PI * 2;
-      ch.heading += cdh * Math.min(1, dt * 10);
+      var stepx = cdx / cdd * cmove, stepy = cdy / cdd * cmove;
+      var wtx = Math.floor((ch.cx + stepx) / TILE), wty = Math.floor((ch.cy + stepy) / TILE);
+      var wb = inBounds(wtx, wty) ? biome[idx(wtx, wty)] : OCEAN;
+      if (wb === WATER || wb === OCEAN) {
+        // water ahead: turn and skitter along the shore instead
+        var baseA = Math.atan2(cdy, cdx);
+        var turned = false;
+        for (var ta = 0; ta < 4 && !turned; ta++) {
+          var aa = baseA + (ta % 2 ? -1 : 1) * (0.9 + (ta >> 1) * 0.9);
+          var kx = ch.cx + Math.cos(aa) * cmove, ky = ch.cy + Math.sin(aa) * cmove;
+          var ktx = Math.floor(kx / TILE), kty = Math.floor(ky / TILE);
+          var kb = inBounds(ktx, kty) ? biome[idx(ktx, kty)] : OCEAN;
+          if (kb !== WATER && kb !== OCEAN) {
+            ch.cx = kx; ch.cy = ky;
+            ch.heading = aa;
+            turned = true;
+          }
+        }
+        if (ch.state === 'out') { ch.pause = 0.3; crabDart(ch); }
+      } else {
+        ch.cx += stepx;
+        ch.cy += stepy;
+        var want = Math.atan2(cdy, cdx);
+        var cdh = want - ch.heading;
+        while (cdh > Math.PI) cdh -= Math.PI * 2;
+        while (cdh < -Math.PI) cdh += Math.PI * 2;
+        ch.heading += cdh * Math.min(1, dt * 10);
+      }
     } else if (ch.state === 'out') {
       ch.pause = 0.25 + Math.random() * 0.5;
       crabDart(ch);
