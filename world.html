@@ -1008,12 +1008,6 @@ function drawLog(sx, sy, tx, ty) {
   ctx.strokeStyle = barkL;
   ctx.lineWidth = R * 2 - 2;
   ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
-  if (hash2(tx, ty, 141) < 0.45) {
-    // mossy patch on top
-    var ma = P((hash2(tx, ty, 143) - 0.5) * L, -R * 0.55);
-    ctx.fillStyle = '#4d8a3c';
-    ctx.beginPath(); ctx.ellipse(ma[0], ma[1], 9 * sc, 4 * sc, horiz ? 0.15 : 1.4, 0, 7); ctx.fill();
-  }
   var ends = [P(-L, 0), P(L, 0)];
   for (var e = 0; e < 2; e++) {
     ctx.fillStyle = '#c9a06a';
