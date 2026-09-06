@@ -175,6 +175,7 @@ var score = 0, eatCd = 0;
 var playerA = 1, wasHiding = false;
 var treeA = new Float32Array(W * H).fill(1); // canopy fade per tree
 var trunkA = new Float32Array(W * H); // trunk shows only when under the tree
+var bushA = new Float32Array(W * H).fill(1); // bush fade when inside one
 
 function idx(x, y) { return y * W + x; }
 function inBounds(x, y) { return x >= 0 && y >= 0 && x < W && y < H; }
@@ -864,8 +865,9 @@ function drawTree(sx, sy, tx, ty, leafAlpha, trunkAlpha) {
   }
   ctx.globalAlpha = 1;
 }
-function drawBush(sx, sy, tx, ty, n) {
-  // Every bush gets its own size (0.75x - 1.25x) and slight look
+function drawBush(sx, sy, tx, ty, n, alpha) {
+  // Every bush gets its own size and slight look; fades when you're inside
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
   var sc = bushScale(tx, ty);
   var pal = (hash2(tx, ty, 85) * 3) | 0;
   var base = pal === 2 ? '#2a8a3e' : (pal === 1 ? '#37ad4c' : '#2f9e44');
@@ -891,6 +893,7 @@ function drawBush(sx, sy, tx, ty, n) {
     var bx = sx + Math.cos(a) * 8 * sc, by = sy - 1 + Math.sin(a) * 7 * sc;
     ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill(); ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 }
 function drawStump(sx, sy, tx, ty) {
   // Old stump seen from above: bark ring around wood with growth rings
@@ -1111,7 +1114,14 @@ function render(t, rdt) {
     var bti2 = idx(btx, bty);
     if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
     else if (logs[bti2]) drawLog(ox, oyy, btx, bty);
-    else drawBush(ox, oyy, btx, bty, berryN[bti2]);
+    else {
+      var bsc = bushScale(btx, bty);
+      var bdx = player.x - ox, bdy = player.y - oyy;
+      var bUnder = (bdx * bdx + bdy * bdy) < (14 * bsc + 6) * (14 * bsc + 6);
+      var bTarget = bUnder ? 0.5 : 1;
+      bushA[bti2] += (bTarget - bushA[bti2]) * Math.min(1, rdt * 10);
+      drawBush(ox, oyy, btx, bty, berryN[bti2], bushA[bti2]);
+    }
   }
   if (!drewPlayer) drawPlayer(px, py, t);
 
