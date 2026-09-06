@@ -575,8 +575,9 @@ function mushPos(tx, ty, k) {
   var sc = logScale(tx, ty);
   var cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
   var horiz = hash2(tx, ty, 121) < 0.5;
-  var side = hash2(tx, ty, 122) < 0.5 ? 1 : -1;
-  var a = (k - 1) * 12 * sc;
+  // each mushroom picks its own random flank so they ring the log
+  var side = hash2(tx + k * 17, ty + k * 23, 153) < 0.5 ? 1 : -1;
+  var a = (k - 1) * 12 * sc + (hash2(tx + k * 5, ty + k * 31, 157) - 0.5) * 8;
   return horiz ? { x: cx + a, y: cy + side * 11 * sc } : { x: cx + side * 11 * sc, y: cy + a };
 }
 function shroomPos(tx, ty, k) {
@@ -895,7 +896,7 @@ function drawLog(sx, sy, tx, ty) {
     ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(ends[e][0], ends[e][1], (R - 1.5) * 0.55, 0, 7); ctx.stroke();
   }
-  // snapped branch nub on the opposite side from the mushrooms
+  // snapped branch nub on a random side
   var side = hash2(tx, ty, 122) < 0.5 ? 1 : -1;
   var off = (hash2(tx, ty, 123) - 0.5) * 20 * sc;
   var n0 = horiz ? [sx + off, sy - side * R] : [sx - side * R, sy + off];
