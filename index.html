@@ -62,6 +62,7 @@
       border-radius: 10px;
       outline: none;
       box-shadow: 0 2px 8px #0006;
+      transition: transform 0.25s ease, opacity 0.25s ease;
     }
     #search::placeholder { color: #bbb; }
     #search:focus { background: rgba(0, 0, 0, 0.75); border-color: #ffd700; }
@@ -288,6 +289,17 @@
       });
       noResults.style.display = visible ? 'none' : 'block';
     });
+
+    // Hide the pinned search bar while scrolling down so games never
+    // slide under it; show it again when scrolling up or while typing.
+    var lastY = window.scrollY;
+    window.addEventListener('scroll', function () {
+      var y = window.scrollY;
+      var hide = y > lastY && y > 120 && document.activeElement !== searchInput;
+      searchInput.style.transform = hide ? 'translateY(-80px)' : '';
+      searchInput.style.opacity = hide ? '0' : '';
+      lastY = y;
+    }, { passive: true });
   </script>
   <!-- Google Analytics (optional, for tracking) -->
   <!--
