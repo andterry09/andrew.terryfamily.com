@@ -1075,9 +1075,9 @@ function render(t, rdt) {
       var b = biome[i];
       var sx = x * TILE, sy = y * TILE;
       var v = hash2(x, y, 21) - 0.5;
-      if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
-      else if (b === WATER) ctx.fillStyle = shade(C_WATER, v * 12);
-      else if (b === SAND) ctx.fillStyle = shade(C_SAND, v * 14);
+      if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, (fbm(x * 0.08 + 500, y * 0.08 + 500, 2) - 0.5) * 22 + v * 3);
+      else if (b === WATER) ctx.fillStyle = shade(C_WATER, (fbm(x * 0.08 + 700, y * 0.08 + 700, 2) - 0.5) * 22 + v * 3);
+      else if (b === SAND) ctx.fillStyle = shade(C_SAND, (fbm(x * 0.08 + 900, y * 0.08 + 900, 2) - 0.5) * 30 + v * 4);
       else ctx.fillStyle = shade(C_GRASS, (fbm(x * 0.08, y * 0.08, 2) - 0.5) * 44 + v * 5);
       ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
 
@@ -1167,35 +1167,30 @@ function render(t, rdt) {
     }
   }
 
-  // Soft coasts: rounded blobs over biome seams hide the blocky tile edges.
-  // Sand blobs go down first, water blobs on top, so shorelines curve.
-  for (var pass = 0; pass < 2; pass++) {
-    var wantSand = pass === 0;
-    for (y = y0; y <= y1; y++) {
-      for (x = x0; x <= x1; x++) {
-        var bi2 = idx(x, y);
-        var bb2 = biome[bi2];
-        var isSand = bb2 === SAND;
-        var isWater = bb2 === WATER || bb2 === OCEAN;
-        if (wantSand ? !isSand : !isWater) continue;
-        var edge = false;
-        for (var ey = -1; ey <= 1 && !edge; ey++) {
-          for (var ex = -1; ex <= 1 && !edge; ex++) {
-            if (!ex && !ey) continue;
-            var nx2 = x + ex, ny2 = y + ey;
-            if (!inBounds(nx2, ny2)) continue;
-            var nb = biome[idx(nx2, ny2)];
-            if (wantSand) { if (nb !== SAND) edge = true; }
-            else if (nb !== WATER && nb !== OCEAN) edge = true;
-          }
+  // Soft seams: blend a narrow band along biome borders so coasts
+  // transition smoothly without any circular blobs.
+  function rgba3(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+  var STEPS = [[3, 0.55], [3, 0.3], [4, 0.15]];
+  var DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (y = y0; y <= y1; y++) {
+    for (x = x0; x <= x1; x++) {
+      var bi3 = idx(x, y);
+      for (var di = 0; di < 4; di++) {
+        var nx3 = x + DIRS[di][0], ny3 = y + DIRS[di][1];
+        if (!inBounds(nx3, ny3)) continue;
+        var nb3 = biome[idx(nx3, ny3)];
+        if (nb3 === biome[bi3]) continue;
+        var nc = nb3 === OCEAN ? C_OCEAN : nb3 === WATER ? C_WATER : nb3 === SAND ? C_SAND : C_GRASS;
+        var off = 0;
+        for (var s3 = 0; s3 < STEPS.length; s3++) {
+          var w = STEPS[s3][0];
+          ctx.fillStyle = rgba3(nc, STEPS[s3][1]);
+          if (DIRS[di][0] === 1) ctx.fillRect((x + 1) * TILE - off - w, y * TILE, w, TILE);
+          else if (DIRS[di][0] === -1) ctx.fillRect(x * TILE + off, y * TILE, w, TILE);
+          else if (DIRS[di][1] === 1) ctx.fillRect(x * TILE, (y + 1) * TILE - off - w, TILE, w);
+          else ctx.fillRect(x * TILE, y * TILE + off, TILE, w);
+          off += w;
         }
-        if (!edge) continue;
-        var vv = hash2(x, y, 21) - 0.5;
-        if (wantSand) ctx.fillStyle = shade(C_SAND, vv * 14);
-        else ctx.fillStyle = shade(bb2 === OCEAN ? C_OCEAN : C_WATER, vv * 12);
-        ctx.beginPath();
-        ctx.arc(x * TILE + TILE / 2 + (hash2(x, y, 191) - 0.5) * 8, y * TILE + TILE / 2 + (hash2(x, y, 193) - 0.5) * 8, TILE * 0.75, 0, 7);
-        ctx.fill();
       }
     }
   }
