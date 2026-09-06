@@ -27,12 +27,22 @@
       overflow-y: auto;
     }
     body {
-      background: url('back.png') center center/cover no-repeat fixed;
+      background-color: #141c26;
       color: #fff;
       font-family: 'Segoe UI', sans-serif;
       min-height: 100vh;
       position: relative;
       padding-top: 62px;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: url('back.png') center center/cover no-repeat;
+      z-index: -1;
     }
     h1 {
       margin-top: 40px;
