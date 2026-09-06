@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Open World</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0b1020;
+    font-family: 'Segoe UI', sans-serif;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    pointer-events: none;
+  }
+  #hud .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
+  #new-world {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 11;
+    margin-top: 76px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  #new-world:hover { background: rgba(0, 0, 0, 0.75); }
+  #help {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="title">🌍 Open World</div>
+  <div id="coords">x: 0, y: 0</div>
+</div>
+<button id="new-world" type="button">🎲 New World</button>
+<div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
+<script>
+'use strict';
+// ---------- Config ----------
+var TILE = 32;
+var W = 240, H = 240;               // decently big, but NOT infinite
+var WORLD_PX = W * TILE, WORLD_PY = H * TILE;
+var WATER_LEVEL = 0.30;
+var SAND_LINE = 0.345;
+
+// Biome ids
+var OCEAN = 0, WATER = 1, SAND = 2, GRASS = 3;
+
+// ---------- Deterministic hashing / RNG ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash2(x, y, s) {
+  var h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1442695041)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967295;
+}
+
+// ---------- Value noise ----------
+var lat = new Float32Array(256);
+var perm = new Uint8Array(512);
+function seedNoise(rand) {
+  var p = [];
+  for (var i = 0; i < 256; i++) { p[i] = i; lat[i] = rand(); }
+  for (var j = 255; j > 0; j--) {
+    var k = (rand() * (j + 1)) | 0;
+    var tmp = p[j]; p[j] = p[k]; p[k] = tmp;
+  }
+  for (var m = 0; m < 512; m++) perm[m] = p[m & 255];
+}
+function vnoise(x, y) {
+  var xi = Math.floor(x), yi = Math.floor(y);
+  var xf = x - xi, yf = y - yi;
+  var X = xi & 255, Y = yi & 255;
+  var v00 = lat[perm[(perm[X] + Y) & 511] & 255];
+  var v10 = lat[perm[(perm[(X + 1) & 255] + Y) & 511] & 255];
+  var v01 = lat[perm[(perm[X] + Y + 1) & 511] & 255];
+  var v11 = lat[perm[(perm[(X + 1) & 255] + Y + 1) & 511] & 255];
+  var u = xf * xf * (3 - 2 * xf);
+  var v = yf * yf * (3 - 2 * yf);
+  return (v00 * (1 - u) + v10 * u) * (1 - v) + (v01 * (1 - u) + v11 * u) * v;
+}
+function fbm(x, y, oct) {
+  var sum = 0, amp = 0.5, f = 1, norm = 0;
+  for (var i = 0; i < oct; i++) {
+    sum += amp * vnoise(x * f, y * f);
+    norm += amp;
+    amp *= 0.5;
+    f *= 2.03;
+  }
+  return sum / norm;
+}
+
+// ---------- World data ----------
+var elev = new Float32Array(W * H);
+var biome = new Uint8Array(W * H);   // OCEAN/WATER/SAND/GRASS
+var trees = new Uint8Array(W * H);
+var bushes = new Uint8Array(W * H);
+var solid = new Uint8Array(W * H);
+var seed = 20260906;
+
+function idx(x, y) { return y * W + x; }
+function inBounds(x, y) { return x >= 0 && y >= 0 && x < W && y < H; }
+
+function generate(s) {
+  seed = s;
+  var rand = mulberry32(seed);
+  seedNoise(rand);
+  var x, y;
+
+  // Elevation with island falloff (ocean at the edges)
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var base = fbm(x * 0.014, y * 0.014, 4);
+      base += 0.15 * fbm(x * 0.06 + 40, y * 0.06 + 40, 2);
+      var dx = (x - W / 2) / (W / 2);
+      var dy = (y - H / 2) / (H / 2);
+      var d = Math.sqrt(dx * dx + dy * dy) / Math.SQRT2;
+      elev[idx(x, y)] = base + 0.06 - Math.pow(d, 2.1) * 0.72;
+    }
+  }
+
+  // Base water vs land
+  for (var i = 0; i < W * H; i++) {
+    biome[i] = elev[i] < WATER_LEVEL ? WATER : GRASS;
+  }
+
+  // Rivers: 3 winding downhill carves
+  for (var r = 0; r < 3; r++) {
+    // start at a high point
+    var sx = 0, sy = 0, best = -1;
+    for (var t = 0; t < 60; t++) {
+      var px = 30 + ((rand() * (W - 60)) | 0);
+      var py = 30 + ((rand() * (H - 60)) | 0);
+      if (elev[idx(px, py)] > best) { best = elev[idx(px, py)]; sx = px; sy = py; }
+    }
+    var cx = sx, cy = sy, pdx = 0, pdy = 1;
+    for (var step = 0; step < 700; step++) {
+      if (!inBounds(cx, cy)) break;
+      if (biome[idx(cx, cy)] === WATER && step > 10) break;
+      // carve river (1-2 wide) + wet the elevation so banks read naturally
+      for (var oy = -1; oy <= 1; oy++) {
+        for (var ox = -1; ox <= 1; ox++) {
+          var nx = cx + ox, ny = cy + oy;
+          if (!inBounds(nx, ny)) continue;
+          if (Math.abs(ox) + Math.abs(oy) <= 1) {
+            biome[idx(nx, ny)] = WATER;
+            elev[idx(nx, ny)] = Math.min(elev[idx(nx, ny)], WATER_LEVEL - 0.05);
+          }
+        }
+      }
+      // pick next step: prefer downhill + keep momentum + meander
+      var bx = 0, by = 0, bs = -1e9;
+      for (var ddy = -1; ddy <= 1; ddy++) {
+        for (var ddx = -1; ddx <= 1; ddx++) {
+          if (!ddx && !ddy) continue;
+          if (ddx === -pdx && ddy === -pdy) continue;
+          var qx = cx + ddx, qy = cy + ddy;
+          if (!inBounds(qx, qy)) continue;
+          var score = (elev[idx(cx, cy)] - elev[idx(qx, qy)]) * 4 +
+                      (ddx * pdx + ddy * pdy) * 0.7 +
+                      (hash2(qx, qy, seed + step) - 0.5) * 1.2;
+          if (score > bs) { bs = score; bx = ddx; by = ddy; }
+        }
+      }
+      pdx = bx; pdy = by; cx += bx; cy += by;
+    }
+  }
+
+  // Ocean = water connected to the map border (flood fill); inland water stays lakes/rivers
+  var stack = [];
+  for (x = 0; x < W; x++) { stack.push([x, 0]); stack.push([x, H - 1]); }
+  for (y = 0; y < H; y++) { stack.push([0, y]); stack.push([W - 1, y]); }
+  while (stack.length) {
+    var c = stack.pop();
+    var qx2 = c[0], qy2 = c[1];
+    if (!inBounds(qx2, qy2)) continue;
+    var ii = idx(qx2, qy2);
+    if (biome[ii] !== WATER || solid[ii] === 2) continue;
+    biome[ii] = OCEAN;
+    solid[ii] = 2; // visited marker reused below
+    stack.push([qx2 + 1, qy2]); stack.push([qx2 - 1, qy2]);
+    stack.push([qx2, qy2 + 1]); stack.push([qx2, qy2 - 1]);
+  }
+
+  // Spawn: nearest grass to center
+  var spawn = { x: W >> 1, y: H >> 1 };
+  outer:
+  for (var rad = 0; rad < W; rad++) {
+    for (var ay = -rad; ay <= rad; ay++) {
+      for (var ax = -rad; ax <= rad; ax++) {
+        if (Math.max(Math.abs(ax), Math.abs(ay)) !== rad) continue;
+        var gx = (W >> 1) + ax, gy = (H >> 1) + ay;
+        if (inBounds(gx, gy) && biome[idx(gx, gy)] === GRASS) {
+          spawn = { x: gx, y: gy };
+          break outer;
+        }
+      }
+    }
+  }
+
+  // Sand: low land or land touching water
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i2 = idx(x, y);
+      if (biome[i2] !== GRASS) continue;
+      if (elev[i2] < SAND_LINE) { biome[i2] = SAND; continue; }
+      var nearWater = false;
+      for (var wy = -1; wy <= 1 && !nearWater; wy++) {
+        for (var wx = -1; wx <= 1; wx++) {
+          if (!wx && !wy) continue;
+          var vx = x + wx, vy = y + wy;
+          if (!inBounds(vx, vy)) continue;
+          var b = biome[idx(vx, vy)];
+          if (b === WATER || b === OCEAN) { nearWater = true; break; }
+        }
+      }
+      if (nearWater) biome[i2] = SAND;
+    }
+  }
+
+  // Trees (grassy forests) + bushes, keeping spawn clearing
+  trees.fill(0); bushes.fill(0); solid.fill(0);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i3 = idx(x, y);
+      var bb = biome[i3];
+      if (bb === WATER || bb === OCEAN) { solid[i3] = 1; continue; }
+      if (bb !== GRASS) continue;
+      var sdx = x - spawn.x, sdy = y - spawn.y;
+      if (sdx * sdx + sdy * sdy < 25) continue;
+      var forest = fbm(x * 0.045 + 300, y * 0.045 + 300, 3);
+      if (forest > 0.60 && hash2(x, y, seed + 5) < 0.55) {
+        trees[i3] = 1;
+        solid[i3] = 1;
+      } else if (hash2(x, y, seed + 9) < 0.07) {
+        bushes[i3] = 1;
+      }
+    }
+  }
+
+  buildMinimap();
+  return spawn;
+}
+
+// ---------- Minimap ----------
+var mapCanvas = document.createElement('canvas');
+mapCanvas.width = W; mapCanvas.height = H;
+function buildMinimap() {
+  var ctx = mapCanvas.getContext('2d');
+  var img = ctx.createImageData(W, H);
+  for (var y = 0; y < H; y++) {
+    for (var x = 0; x < W; x++) {
+      var i = idx(x, y), o = i * 4;
+      var r = 60, g = 179, b = 113;
+      if (biome[i] === OCEAN) { r = 20; g = 60; b = 140; }
+      else if (biome[i] === WATER) { r = 52; g = 152; b = 219; }
+      else if (biome[i] === SAND) { r = 244; g = 226; b = 133; }
+      else if (trees[i]) { r = 20; g = 90; b = 40; }
+      img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---------- Canvas / input ----------
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var dpr = 1, vw = 0, vh = 0;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  vw = window.innerWidth; vh = window.innerHeight;
+  canvas.width = Math.floor(vw * dpr);
+  canvas.height = Math.floor(vh * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+var keys = {};
+window.addEventListener('keydown', function (e) {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) !== -1) e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+});
+window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+// Touch joystick
+var joy = { active: false, id: null, bx: 0, by: 0, dx: 0, dy: 0 };
+canvas.addEventListener('touchstart', function (e) {
+  e.preventDefault();
+  if (joy.active) return;
+  var t = e.changedTouches[0];
+  joy.active = true; joy.id = t.identifier;
+  joy.bx = t.clientX; joy.by = t.clientY; joy.dx = 0; joy.dy = 0;
+}, { passive: false });
+canvas.addEventListener('touchmove', function (e) {
+  e.preventDefault();
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var t = e.changedTouches[i];
+    if (t.identifier !== joy.id) continue;
+    var dx = t.clientX - joy.bx, dy = t.clientY - joy.by;
+    var len = Math.hypot(dx, dy), max = 55;
+    if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+    joy.dx = dx / max; joy.dy = dy / max;
+  }
+}, { passive: false });
+function joyEnd(e) {
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === joy.id) {
+      joy.active = false; joy.dx = 0; joy.dy = 0;
+    }
+  }
+}
+canvas.addEventListener('touchend', joyEnd);
+canvas.addEventListener('touchcancel', joyEnd);
+
+// ---------- Player ----------
+var player = { x: 0, y: 0, r: 11, fx: 0, fy: 1 };
+var spawnTile = generate(seed);
+player.x = (spawnTile.x + 0.5) * TILE;
+player.y = (spawnTile.y + 0.5) * TILE;
+var cam = { x: 0, y: 0 };
+var coordsEl = document.getElementById('coords');
+document.getElementById('new-world').addEventListener('click', function () {
+  spawnTile = generate((Math.random() * 1e9) | 0);
+  player.x = (spawnTile.x + 0.5) * TILE;
+  player.y = (spawnTile.y + 0.5) * TILE;
+});
+
+function hitsSolid(px, py) {
+  var r = player.r - 3;
+  var x0 = Math.floor((px - r) / TILE), x1 = Math.floor((px + r) / TILE);
+  var y0 = Math.floor((py - r) / TILE), y1 = Math.floor((py + r) / TILE);
+  for (var ty = y0; ty <= y1; ty++) {
+    for (var tx = x0; tx <= x1; tx++) {
+      if (!inBounds(tx, ty)) return true;
+      if (solid[idx(tx, ty)]) {
+        // circle vs tile rect
+        var nx = Math.max(tx * TILE, Math.min(px, tx * TILE + TILE));
+        var ny = Math.max(ty * TILE, Math.min(py, ty * TILE + TILE));
+        var dx = px - nx, dy = py - ny;
+        if (dx * dx + dy * dy < r * r) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function update(dt) {
+  var dx = 0, dy = 0;
+  if (keys['a'] || keys['arrowleft']) dx -= 1;
+  if (keys['d'] || keys['arrowright']) dx += 1;
+  if (keys['w'] || keys['arrowup']) dy -= 1;
+  if (keys['s'] || keys['arrowdown']) dy += 1;
+  if (joy.active) { dx += joy.dx; dy += joy.dy; }
+  var len = Math.hypot(dx, dy);
+  if (len > 1) { dx /= len; dy /= len; }
+  if (len > 0.01) { player.fx = dx / (len > 1 ? 1 : len); player.fy = dy / (len > 1 ? 1 : len); }
+  var speed = (keys['shift'] ? 340 : 220) * dt;
+  var nx = player.x + dx * speed;
+  if (!hitsSolid(nx, player.y)) player.x = nx;
+  var ny = player.y + dy * speed;
+  if (!hitsSolid(player.x, ny)) player.y = ny;
+  player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
+  player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+
+  cam.x = Math.max(0, Math.min(WORLD_PX - vw, player.x - vw / 2));
+  cam.y = Math.max(0, Math.min(WORLD_PY - vh, player.y - vh / 2));
+  coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
+}
+
+// ---------- Drawing ----------
+function shade(base, amt) {
+  return 'rgb(' + Math.max(0, Math.min(255, base[0] + amt)) + ',' +
+         Math.max(0, Math.min(255, base[1] + amt)) + ',' +
+         Math.max(0, Math.min(255, base[2] + amt)) + ')';
+}
+var C_OCEAN = [22, 68, 150], C_WATER = [52, 152, 219],
+    C_SAND = [238, 220, 130], C_GRASS = [62, 172, 100];
+
+function drawTree(sx, sy, v) {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 12, 12, 5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#6b4a2b';
+  ctx.fillRect(sx - 3, sy - 2, 6, 14);
+  var g1 = v < 0.5 ? '#1e6b2e' : '#27933a';
+  var g2 = v < 0.5 ? '#27933a' : '#37ad4c';
+  ctx.fillStyle = g1;
+  ctx.beginPath(); ctx.arc(sx - 7, sy - 8, 10, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx + 7, sy - 8, 10, 0, 7); ctx.fill();
+  ctx.fillStyle = g2;
+  ctx.beginPath(); ctx.arc(sx, sy - 15, 11, 0, 7); ctx.fill();
+}
+function drawBush(sx, sy, v) {
+  ctx.fillStyle = v < 0.5 ? '#2f9e44' : '#40b355';
+  ctx.beginPath(); ctx.arc(sx - 5, sy + 2, 6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx + 5, sy + 2, 6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx, sy - 3, 7, 0, 7); ctx.fill();
+  ctx.fillStyle = '#e1306c';
+  if (v > 0.6) { ctx.beginPath(); ctx.arc(sx + 2, sy - 4, 2, 0, 7); ctx.fill(); }
+}
+function drawPlayer(sx, sy, t) {
+  var bob = Math.sin(t / 130) * 1.5;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 11, 10, 4, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#0d47a1';
+  ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 11, 0, 7); ctx.fill();
+  ctx.fillStyle = '#2196f3';
+  ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 7.5, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ffcc99';
+  ctx.beginPath(); ctx.arc(sx, sy - 2 + bob * 0.4, 5, 0, 7); ctx.fill();
+  // facing nose
+  ctx.fillStyle = '#ffcc99';
+  ctx.beginPath();
+  ctx.arc(sx + player.fx * 9, sy + bob * 0.4 + player.fy * 9, 3, 0, 7);
+  ctx.fill();
+}
+
+function render(t) {
+  ctx.fillStyle = '#0b1020';
+  ctx.fillRect(0, 0, vw, vh);
+  var x0 = Math.max(0, Math.floor(cam.x / TILE));
+  var y0 = Math.max(0, Math.floor(cam.y / TILE));
+  var x1 = Math.min(W - 1, Math.ceil((cam.x + vw) / TILE));
+  var y1 = Math.min(H - 1, Math.ceil((cam.y + vh) / TILE));
+  var x, y;
+
+  for (y = y0; y <= y1; y++) {
+    for (x = x0; x <= x1; x++) {
+      var i = idx(x, y);
+      var b = biome[i];
+      var sx = x * TILE - cam.x, sy = y * TILE - cam.y;
+      var v = hash2(x, y, 21) - 0.5;
+      if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
+      else if (b === WATER) ctx.fillStyle = shade(C_WATER, v * 12);
+      else if (b === SAND) ctx.fillStyle = shade(C_SAND, v * 14);
+      else ctx.fillStyle = shade(C_GRASS, v * 16);
+      ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+
+      if (b === WATER || b === OCEAN) {
+        // gentle shimmer
+        if (hash2(x, y, 22) < 0.18) {
+          var ph = Math.sin(t / 700 + x * 1.3 + y * 0.7);
+          ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 + 0.08 * ph).toFixed(3) + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          var wy = sy + 8 + hash2(x, y, 23) * 16;
+          ctx.moveTo(sx + 5, wy);
+          ctx.quadraticCurveTo(sx + 12, wy - 3 + ph * 2, sx + 19, wy);
+          ctx.quadraticCurveTo(sx + 24, wy + 3 - ph * 2, sx + 28, wy);
+          ctx.stroke();
+        }
+      } else if (b === GRASS) {
+        if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i]) {
+          ctx.strokeStyle = 'rgba(20,90,40,0.7)';
+          ctx.lineWidth = 2;
+          var gx = sx + 6 + hash2(x, y, 25) * 20;
+          var gy = sy + 6 + hash2(x, y, 26) * 20;
+          ctx.beginPath();
+          ctx.moveTo(gx, gy); ctx.lineTo(gx - 2, gy - 6);
+          ctx.moveTo(gx + 5, gy + 1); ctx.lineTo(gx + 7, gy - 5);
+          ctx.stroke();
+        }
+      } else if (b === SAND) {
+        if (hash2(x, y, 27) < 0.4) {
+          ctx.fillStyle = 'rgba(190,170,100,0.6)';
+          ctx.fillRect(sx + hash2(x, y, 28) * 26 + 2, sy + hash2(x, y, 29) * 26 + 2, 3, 3);
+        }
+      }
+    }
+  }
+
+  // Y-sorted objects + player
+  var px = player.x - cam.x, py = player.y - cam.y;
+  var drewPlayer = false;
+  var drawables = [];
+  for (y = y0; y <= y1; y++) {
+    for (x = x0; x <= x1; x++) {
+      var j = idx(x, y);
+      if (trees[j] || bushes[j]) drawables.push([y * TILE + 12, x, y]);
+    }
+  }
+  drawables.sort(function (a, b2) { return a[0] - b2[0]; });
+  for (var d = 0; d < drawables.length; d++) {
+    var oy = drawables[d][0];
+    if (!drewPlayer && player.y < oy) { drawPlayer(px, py, t); drewPlayer = true; }
+    var ox = drawables[d][1] * TILE + TILE / 2 - cam.x;
+    var oyy = drawables[d][2] * TILE + TILE / 2 - cam.y;
+    var vv = hash2(drawables[d][1], drawables[d][2], 31);
+    if (trees[idx(drawables[d][1], drawables[d][2])]) drawTree(ox, oyy, vv);
+    else drawBush(ox, oyy, vv);
+  }
+  if (!drewPlayer) drawPlayer(px, py, t);
+
+  // Touch joystick visual
+  if (joy.active) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(joy.bx, joy.by, 55, 0, 7); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath(); ctx.arc(joy.bx + joy.dx * 55, joy.by + joy.dy * 55, 22, 0, 7); ctx.fill();
+  }
+
+  // Minimap
+  var mm = 150, mx = vw - mm - 12, my = 12;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(mx - 5, my - 5, mm + 10, mm + 10);
+  ctx.drawImage(mapCanvas, mx, my, mm, mm);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(mx - 5, my - 5, mm + 10, mm + 10);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(mx + (player.x / WORLD_PX) * mm, my + (player.y / WORLD_PY) * mm, 3.5, 0, 7);
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ---------- Main loop ----------
+var last = performance.now();
+function loop(now) {
+  var dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  render(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
