@@ -293,8 +293,8 @@ function generate(s) {
   var buckets = new Array(BW * BH);
   // returns -1 = reject, -2 = clean accept, or partner index = snuggle accept
   function treeOK(px, py, sc, cozy) {
-    var xa = Math.max(0, Math.floor((px - 105) / BC)), xb = Math.min(BW - 1, Math.floor((px + 105) / BC));
-    var ya = Math.max(0, Math.floor((py - 105) / BC)), yb = Math.min(BH - 1, Math.floor((py + 105) / BC));
+    var xa = Math.max(0, Math.floor((px - 120) / BC)), xb = Math.min(BW - 1, Math.floor((px + 120) / BC));
+    var ya = Math.max(0, Math.floor((py - 120) / BC)), yb = Math.min(BH - 1, Math.floor((py + 120) / BC));
     var touches = 0, minD = Infinity, partner = -1;
     for (var cy = ya; cy <= yb; cy++) {
       for (var cx = xa; cx <= xb; cx++) {
@@ -336,7 +336,7 @@ function generate(s) {
     var cxx = cix % W, cyy = (cix / W) | 0;
     var csc = treeScale(cxx, cyy);
     var cxp = (cxx + 0.5) * TILE, cyp = (cyy + 0.5) * TILE;
-    var cozy = rand() < 0.015; // a few trees may snuggle one neighbor
+    var cozy = rand() < 0.06; // plenty of trees may snuggle one neighbor
     var verdict = treeOK(cxp, cyp, csc, cozy);
     if (verdict === -1) continue;
     var id = placedX.length;
@@ -456,7 +456,7 @@ document.getElementById('new-world').addEventListener('click', function () {
   berriesEl.textContent = '🫐 Berries: 0';
 });
 
-function treeScale(tx, ty) { return 1.3 + hash2(tx, ty, 41) * 0.4; } // 1.3 - 1.7x
+function treeScale(tx, ty) { return 1.5 + hash2(tx, ty, 41) * 0.5; } // 1.5 - 2.0x
 
 function hitsSolid(px, py) {
   var r = player.r - 3;
