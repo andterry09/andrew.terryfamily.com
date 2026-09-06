@@ -167,6 +167,7 @@ var berryT = new Float32Array(W * H); // regrow timer per bush
 var litter = new Uint8Array(W * H); // forest floor: 0 none, 1 leaf, 2 leaf, 3 stick
 var stumps = new Uint8Array(W * H); // rare old stumps
 var shells = new Uint8Array(W * H); // shells on ocean beaches: 0 none, 1 pink, 2 white, 3 purple
+var crabHoles = []; // beach crab holes: {x,y,state,timer,cx,cy,tx,ty,pause,heading}
 var noBush = new Uint8Array(W * H); // keep bushes clear of logs/stumps
 var open = new Uint8Array(W * H); // open field: grass with no trees nearby
 var logs = new Uint8Array(W * H); // fallen leafless logs
@@ -561,6 +562,40 @@ function generate(s) {
     }
   }
 
+  // Rare beach-crab holes on ocean sand
+  crabHoles = [];
+  var ccands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var ci = idx(x, y);
+      if (biome[ci] !== SAND) continue;
+      var isBeach = false;
+      for (var coy = -1; coy <= 1 && !isBeach; coy++) {
+        for (var cox = -1; cox <= 1 && !isBeach; cox++) {
+          if (!cox && !coy) continue;
+          var cnx = x + cox, cny = y + coy;
+          if (!inBounds(cnx, cny)) continue;
+          if (biome[idx(cnx, cny)] === OCEAN) isBeach = true;
+        }
+      }
+      if (isBeach) ccands.push(ci);
+    }
+  }
+  for (var si2 = ccands.length - 1; si2 > 0; si2--) {
+    var sj2 = (rand() * (si2 + 1)) | 0;
+    var tmp2 = ccands[si2]; ccands[si2] = ccands[sj2]; ccands[sj2] = tmp2;
+  }
+  for (var hi3 = 0; hi3 < ccands.length && crabHoles.length < 6; hi3++) {
+    var hx = (ccands[hi3] % W + 0.5) * TILE, hy = (((ccands[hi3] / W) | 0) + 0.5) * TILE;
+    var far = true;
+    for (var pi = 0; pi < crabHoles.length; pi++) {
+      var pdx = hx - crabHoles[pi].x, pdy = hy - crabHoles[pi].y;
+      if (pdx * pdx + pdy * pdy < 200 * 200) { far = false; break; }
+    }
+    if (!far) continue;
+    crabHoles.push({ x: hx, y: hy, state: 'hidden', timer: 8 + ((seed + crabHoles.length * 37) % 40), cx: hx, cy: hy, tx: hx, ty: hy, pause: 0, heading: 0 });
+  }
+
   buildMinimap();
   return spawn;
 }
@@ -685,6 +720,20 @@ function shroomPos(tx, ty, k) {
   return { x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr };
 }
 
+function crabDart(ch) {
+  for (var a = 0; a < 6; a++) {
+    var ang = Math.random() * Math.PI * 2;
+    var dist = 25 + Math.random() * 45;
+    var nx = ch.x + Math.cos(ang) * dist, ny = ch.y + Math.sin(ang) * dist;
+    var tx = Math.floor(nx / TILE), ty = Math.floor(ny / TILE);
+    if (!inBounds(tx, ty)) continue;
+    var b = biome[idx(tx, ty)];
+    if (b === WATER || b === OCEAN) continue;
+    ch.tx = nx; ch.ty = ny;
+    return;
+  }
+  ch.tx = ch.x; ch.ty = ch.y;
+}
 function hitsSolid(px, py) {
   var r = player.r - 3;
   if (px - r < 0 || py - r < 0 || px + r > WORLD_PX || py + r > WORLD_PY) return true;
@@ -912,6 +961,47 @@ function update(dt) {
     wasHiding = hiding;
     hiddenEl.style.display = hiding ? 'block' : 'none';
   }
+  // Beach crabs: rarely pop out of their holes, skitter around, duck back in
+  for (var chi = 0; chi < crabHoles.length; chi++) {
+    var ch = crabHoles[chi];
+    if (ch.state === 'hidden') {
+      ch.timer -= dt;
+      if (ch.timer <= 0) {
+        ch.state = 'out';
+        ch.timer = 4 + Math.random() * 2;
+        ch.cx = ch.x; ch.cy = ch.y;
+        ch.pause = 0;
+        crabDart(ch);
+      }
+      continue;
+    }
+    var cdx = ch.tx - ch.cx, cdy = ch.ty - ch.cy;
+    var cdd = Math.hypot(cdx, cdy);
+    if (ch.state === 'return' && cdd < 5) {
+      ch.state = 'hidden';
+      ch.timer = 25 + Math.random() * 35;
+      continue;
+    }
+    if (ch.pause > 0) { ch.pause -= dt; }
+    else if (cdd > 1) {
+      var cspeed = ch.state === 'return' ? 170 : 150;
+      var cmove = Math.min(cdd, cspeed * dt);
+      ch.cx += cdx / cdd * cmove;
+      ch.cy += cdy / cdd * cmove;
+      var want = Math.atan2(cdy, cdx);
+      var cdh = want - ch.heading;
+      while (cdh > Math.PI) cdh -= Math.PI * 2;
+      while (cdh < -Math.PI) cdh += Math.PI * 2;
+      ch.heading += cdh * Math.min(1, dt * 10);
+    } else if (ch.state === 'out') {
+      ch.pause = 0.25 + Math.random() * 0.5;
+      crabDart(ch);
+    }
+    if (ch.state === 'out') {
+      ch.timer -= dt;
+      if (ch.timer <= 0) { ch.state = 'return'; ch.tx = ch.x; ch.ty = ch.y; }
+    }
+  }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
 }
 
@@ -1087,6 +1177,32 @@ function drawLog(sx, sy, tx, ty) {
     drawShroom(mp.x, mp.y, mushScale(tx, ty, k)); // world coords, zoom transform is active
   }
 }
+function drawCrab(h, t) {
+  var wig = Math.sin(t / 90) * 1.2;
+  ctx.save();
+  ctx.translate(h.cx, h.cy);
+  ctx.rotate(h.heading);
+  ctx.strokeStyle = '#a93226';
+  ctx.lineWidth = 1.5;
+  for (var l = -1; l <= 1; l++) {
+    ctx.beginPath(); ctx.moveTo(l * 3, -3); ctx.lineTo(l * 4 + wig, -7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(l * 3, 3); ctx.lineTo(l * 4 - wig, 7); ctx.stroke();
+  }
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath(); ctx.arc(7, -4, 2.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(7, 4, 2.5, 0, 7); ctx.fill();
+  ctx.fillStyle = '#c0392b';
+  ctx.strokeStyle = '#7b241c';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, 6, 4.5, 0, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(4.5, -2, 1.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(4.5, 2, 1.4, 0, 7); ctx.fill();
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.arc(5, -2, 0.7, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(5, 2, 0.7, 0, 7); ctx.fill();
+  ctx.restore();
+}
 function drawPlayer(sx, sy, t) {
   // Small round explorer (smaller than a tree); fades when hiding
   ctx.globalAlpha = playerA;
@@ -1243,12 +1359,26 @@ function render(t, rdt) {
   // Y-sorted bushes + player (world coords; zoom transform is active)
   var px = player.x, py = player.y;
   var drewPlayer = false;
+  // crab holes on the sand (crabs themselves are y-sorted below)
+  for (var ho = 0; ho < crabHoles.length; ho++) {
+    var hole = crabHoles[ho];
+    ctx.fillStyle = 'rgba(170,140,90,0.9)';
+    ctx.beginPath(); ctx.ellipse(hole.x, hole.y, 6, 4.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#3a2c1c';
+    ctx.beginPath(); ctx.ellipse(hole.x, hole.y - 1, 3.5, 2.8, 0, 0, 7); ctx.fill();
+  }
   var drawables = [];
   for (y = y0; y <= y1; y++) {
     for (x = x0; x <= x1; x++) {
       var j = idx(x, y);
       if (bushes[j] || stumps[j] || logs[j]) drawables.push([y * TILE + 12, x, y]);
     }
+  }
+  for (var hi2 = 0; hi2 < crabHoles.length; hi2++) {
+    var hh = crabHoles[hi2];
+    if (hh.state === 'hidden') continue;
+    if (hh.cx < cam.x - 40 || hh.cx > cam.x + viewW + 40 || hh.cy < cam.y - 40 || hh.cy > cam.y + viewH + 40) continue;
+    drawables.push([hh.cy, 1000 + hi2, 0]);
   }
   drawables.sort(function (a, b2) { return a[0] - b2[0]; });
   for (var d = 0; d < drawables.length; d++) {
@@ -1258,7 +1388,8 @@ function render(t, rdt) {
     var oyy = drawables[d][2] * TILE + TILE / 2;
     var btx = drawables[d][1], bty = drawables[d][2];
     var bti2 = idx(btx, bty);
-    if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
+    if (btx >= 1000) drawCrab(crabHoles[btx - 1000], t);
+    else if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
     else if (logs[bti2]) drawLog(ox, oyy, btx, bty);
     else {
       var bsc = bushScale(btx, bty);
