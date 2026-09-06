@@ -287,13 +287,15 @@ function generate(s) {
   // Candidates are shuffled and each tree keeps room for its own canopy,
   // so canopies never sit inside each other (small trees may cozy up,
   // big trees stand apart).
-  var placedX = [], placedY = [], placedS = [];
+  var placedX = [], placedY = [], placedS = [], taken = [];
   var BC = 64;
   var BW = Math.ceil(WORLD_PX / BC), BH = Math.ceil(WORLD_PY / BC);
   var buckets = new Array(BW * BH);
+  // returns -1 = reject, -2 = clean accept, or partner index = snuggle accept
   function treeOK(px, py, sc, cozy) {
-    var xa = Math.max(0, Math.floor((px - 85) / BC)), xb = Math.min(BW - 1, Math.floor((px + 85) / BC));
-    var ya = Math.max(0, Math.floor((py - 85) / BC)), yb = Math.min(BH - 1, Math.floor((py + 85) / BC));
+    var xa = Math.max(0, Math.floor((px - 105) / BC)), xb = Math.min(BW - 1, Math.floor((px + 105) / BC));
+    var ya = Math.max(0, Math.floor((py - 105) / BC)), yb = Math.min(BH - 1, Math.floor((py + 105) / BC));
+    var touches = 0, minD = Infinity, partner = -1;
     for (var cy = ya; cy <= yb; cy++) {
       for (var cx = xa; cx <= xb; cx++) {
         var arr = buckets[cy * BW + cx];
@@ -301,12 +303,18 @@ function generate(s) {
         for (var k = 0; k < arr.length; k++) {
           var j = arr[k];
           var dx = px - placedX[j], dy = py - placedY[j];
-          var need = cozy ? 34 : 27.5 * (sc + placedS[j]) + 4;
-          if (dx * dx + dy * dy < need * need) return false;
+          var d = Math.sqrt(dx * dx + dy * dy);
+          if (d < minD) minD = d;
+          var need = 27.5 * (sc + placedS[j]) + 4;
+          if (d < need) { touches++; partner = j; }
+          if (touches > 1) return -1;
         }
       }
     }
-    return true;
+    if (touches === 0) return -2;
+    // snuggle exactly one neighbor that isn't already snuggling; trunks stay apart
+    if (!cozy || taken[partner] || minD < 34) return -1;
+    return partner;
   }
   var cands = [];
   for (y = 0; y < H; y++) {
@@ -328,10 +336,12 @@ function generate(s) {
     var cxx = cix % W, cyy = (cix / W) | 0;
     var csc = treeScale(cxx, cyy);
     var cxp = (cxx + 0.5) * TILE, cyp = (cyy + 0.5) * TILE;
-    var cozy = rand() < 0.08; // a few trees may snuggle (canopies touch, trunks don't)
-    if (!treeOK(cxp, cyp, csc, cozy)) continue;
+    var cozy = rand() < 0.015; // a few trees may snuggle one neighbor
+    var verdict = treeOK(cxp, cyp, csc, cozy);
+    if (verdict === -1) continue;
     var id = placedX.length;
-    placedX.push(cxp); placedY.push(cyp); placedS.push(csc);
+    placedX.push(cxp); placedY.push(cyp); placedS.push(csc); taken.push(0);
+    if (verdict >= 0) { taken[verdict] = 1; taken[id] = 1; }
     var bix = Math.min(BH - 1, Math.floor(cyp / BC)) * BW + Math.min(BW - 1, Math.floor(cxp / BC));
     if (!buckets[bix]) buckets[bix] = [];
     buckets[bix].push(id);
@@ -446,7 +456,7 @@ document.getElementById('new-world').addEventListener('click', function () {
   berriesEl.textContent = '🫐 Berries: 0';
 });
 
-function treeScale(tx, ty) { return 1 + hash2(tx, ty, 41) * 0.35; } // 1.0 - 1.35x
+function treeScale(tx, ty) { return 1.3 + hash2(tx, ty, 41) * 0.4; } // 1.3 - 1.7x
 
 function hitsSolid(px, py) {
   var r = player.r - 3;
