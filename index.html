@@ -42,6 +42,48 @@
       position: relative;
       text-align: center;
     }
+    .page-head {
+      position: relative;
+      z-index: 2;
+    }
+    #search {
+      position: absolute;
+      top: 44px;
+      left: 22px;
+      width: 220px;
+      max-width: 60vw;
+      padding: 10px 14px;
+      font-size: 1rem;
+      font-family: inherit;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 10px;
+      outline: none;
+      box-shadow: 0 2px 8px #0006;
+    }
+    #search::placeholder { color: #bbb; }
+    #search:focus { background: rgba(0, 0, 0, 0.75); border-color: #ffd700; }
+    #no-results {
+      display: none;
+      text-align: center;
+      font-size: 1.2rem;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.55);
+      width: fit-content;
+      margin: 0 auto;
+      padding: 14px 26px;
+      border-radius: 12px;
+      z-index: 1;
+      position: relative;
+    }
+    @media (max-width: 700px) {
+      #search {
+        position: static;
+        display: block;
+        margin: 16px auto 0 auto;
+      }
+    }
     .games-list {
       display: flex;
       flex-wrap: wrap;
@@ -150,7 +192,10 @@
   <!-- <meta name="google-site-verification" content="YOUR_GOOGLE_VERIFICATION_CODE"> -->
 </head>
 <body>
-  <h1>Gamli</h1>
+  <div class="page-head">
+    <input id="search" type="search" placeholder="🔍 Search games..." autocomplete="off" aria-label="Search games">
+    <h1>Gamli</h1>
+  </div>
   <div class="games-list">
     <div class="game-card">
       <img class="game-thumb" src="thumbs/square.svg" alt="Square Clicker logo">
@@ -219,12 +264,27 @@
       <a class="play-btn" href="play.html?game=draw">Play</a>
     </div>
   </div> <!-- Closing the main games-list div -->
+  <div id="no-results">No games found 😕 Try another search.</div>
   <footer>
     &copy; <span id="year">2026</span> My Games. All rights reserved.<br>
     <span style="font-size:0.9em;">This site is indexed by Google. Share and play with friends!</span>
   </footer>
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
+
+    var searchInput = document.getElementById('search');
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.game-card'));
+    var noResults = document.getElementById('no-results');
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value.trim().toLowerCase();
+      var visible = 0;
+      cards.forEach(function (card) {
+        var hit = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
+        card.style.display = hit ? '' : 'none';
+        if (hit) visible++;
+      });
+      noResults.style.display = visible ? 'none' : 'block';
+    });
   </script>
   <!-- Google Analytics (optional, for tracking) -->
   <!--
