@@ -288,8 +288,7 @@ function generate(s) {
       if (region.length < 25) {
         for (var ri = 0; ri < region.length; ri++) {
           var gi = idx(region[ri][0], region[ri][1]);
-          biome[gi] = GRASS;
-          elev[gi] = WATER_LEVEL + 0.06;
+          biome[gi] = SAND; // little sandy clearing instead of a weird pond
         }
       }
     }
