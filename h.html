@@ -1,3 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Draw</title>
+<style>
+  html, body { margin: 0; padding: 0; min-height: 100vh; background: #fff; font-family: 'Segoe UI', sans-serif; }
+  .back-link { position: fixed; top: 12px; left: 12px; z-index: 10001; background: rgba(0,0,0,0.6); color: #fff; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+<a class="back-link" href="index.html">← Back to Games</a>
 <style>
   .color-palette {
     position: fixed;
@@ -257,6 +270,8 @@
   });
 
   document.addEventListener('mousedown', (e) => {
+    // Don't start drawing when interacting with UI (palette, sliders, links, buttons)
+    if (e.target.closest('.color-palette, a, button, input')) return;
     isDrawing = true;
     startNewPath();
     updatePath(e.clientX, e.clientY);
@@ -269,3 +284,5 @@
   // Initialize with red color
   changeColor('#FF0000');
 </script>
+</body>
+</html>

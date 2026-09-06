@@ -30,15 +30,18 @@
       transform: translateX(-50%);
       width: 60px;
       height: 60px;
-      background: url('https://cdn.pixabay.com/photo/2013/07/12/13/58/spaceship-147546_1280.png') no-repeat center/contain;
+      font-size: 48px;
+      line-height: 60px;
+      text-align: center;
       z-index: 2;
     }
     .enemy {
       position: absolute;
       top: 0;
-      width: 80px;
-      height: 50px;
-      background: url('https://cdn.pixabay.com/photo/2014/04/03/10/32/alien-312814_1280.png') no-repeat center/contain;
+      width: 110px;
+      min-height: 50px;
+      font-size: 1em;
+      line-height: 1.2;
       color: #fff;
       font-size: 1.2em;
       font-weight: bold;
@@ -130,13 +133,14 @@
   </style>
 </head>
 <body>
+  <a href="index.html" style="position:fixed;top:12px;left:12px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',sans-serif;font-size:0.95rem;">← Back to Games</a>
   <div id="hud">
     <div>Score: <span id="score">0</span></div>
     <div>Level: <span id="level">1</span></div>
     <div>Lives: <span id="lives">3</span></div>
   </div>
   <div id="game-container">
-    <div id="player"></div>
+    <div id="player">🚀</div>
     <div id="game-over">
       <div id="game-over-text"></div>
       <button onclick="startGame()">Restart</button>
@@ -183,7 +187,7 @@
 
     // Returns a random X such that the new enemy at (x,0) does not overlap with existing enemies at y=0
     function getNonOverlappingX() {
-      const enemyWidth = 80;
+      const enemyWidth = 110;
       const padding = 10; // extra space between enemies
       const maxAttempts = 30;
       let attempt = 0;
@@ -215,7 +219,7 @@
       enemy.className = 'enemy';
       enemy.style.left = x + 'px';
       enemy.style.top = '0px';
-      enemy.textContent = word;
+      enemy.textContent = '👾 ' + word;
       gameContainer.appendChild(enemy);
       // Make the random speed component much smaller, and the level scaling much smaller
       enemies.push({

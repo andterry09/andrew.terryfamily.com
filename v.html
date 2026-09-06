@@ -1,3 +1,12 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Merge Vehicles</title>
+</head>
+<body>
+<a href="index.html" style="position:fixed;top:12px;left:12px;z-index:9999;background:rgba(0,0,0,0.6);color:#fff;padding:8px 14px;border-radius:8px;text-decoration:none;font-family:'Segoe UI',sans-serif;font-size:0.95rem;">← Back to Games</a>
 <!-- Animated, drifting ember-like particles on a yellow background for the Merge Vehicle Game -->
 <style>
 body {
@@ -226,7 +235,7 @@ body::before, body::after {
 // --- GAME LOGIC ---
 const carRepresentations = [ // Renamed from carEmojis to be more general
   "🛴", "🚲", "🛵", "🏍", "🛺", "🚗", "🚙", "🚕", "🚓", "🏎️",
-  "🚚", "truck.png", "🚜", "🚒", "🛻", "🚑", "🚐", "🚌", "🚎", "🚂", // Use image for Semi Truck (index 11)
+  "🚚", "🚛", "🚜", "🚒", "🛻", "🚑", "🚐", "🚌", "🚎", "🚂", // Semi Truck (index 11) — was a missing image file
   "🚇", "🚊", "🚆", "⛵️", "🚤", "🛥", "⛴", "🛳", "🚢", "🛫",
   "🛩", "🚁", "🛰", "🚀", "🛸"
 ];
@@ -760,3 +769,5 @@ function initialRender() {
 }
 initialRender();
 </script>
+</body>
+</html>
