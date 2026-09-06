@@ -285,13 +285,16 @@ function generate(s) {
       var sdx = x - spawn.x, sdy = y - spawn.y;
       if (sdx * sdx + sdy * sdy < 25) continue;
       var forest = fbm(x * 0.045 + 300, y * 0.045 + 300, 3);
-      if (forest > 0.60 && hash2(x, y, seed + 5) < 0.55) {
-        // leave gaps between trunks so you can always slip through
+      if (forest > 0.57 && hash2(x, y, seed + 5) < 0.55) {
+        // keep some space between trunks so forests stay walkable
         var crowded = false;
-        if (x > 0 && trees[i3 - 1]) crowded = true;
-        if (x < W - 1 && trees[i3 + 1]) crowded = true;
-        if (y > 0 && trees[i3 - W]) crowded = true;
-        if (y < H - 1 && trees[i3 + W]) crowded = true;
+        for (var ny2 = y - 1; ny2 <= y + 1 && !crowded; ny2++) {
+          for (var nx2 = x - 1; nx2 <= x + 1 && !crowded; nx2++) {
+            if (nx2 === x && ny2 === y) continue;
+            if (nx2 < 0 || ny2 < 0 || nx2 >= W || ny2 >= H) continue;
+            if (trees[idx(nx2, ny2)]) crowded = true;
+          }
+        }
         if (!crowded) {
           trees[i3] = 1;
           solid[i3] = 1;
@@ -395,6 +398,8 @@ document.getElementById('new-world').addEventListener('click', function () {
   berriesEl.textContent = '🫐 Berries: 0';
 });
 
+function treeScale(tx, ty) { return 1 + hash2(tx, ty, 41) * 0.35; } // 1.0 - 1.35x
+
 function hitsSolid(px, py) {
   var r = player.r - 3;
   var x0 = Math.floor((px - r) / TILE), x1 = Math.floor((px + r) / TILE);
@@ -407,7 +412,7 @@ function hitsSolid(px, py) {
         if (trees[ti]) {
           // only the trunk is solid — you can slip under the leaves
           var tcx = tx * TILE + TILE / 2, tcy = ty * TILE + TILE / 2;
-          var tdx = px - tcx, tdy = py - tcy, trr = r + 7;
+          var tdx = px - tcx, tdy = py - tcy, trr = r + 7 * treeScale(tx, ty);
           if (tdx * tdx + tdy * tdy < trr * trr) return true;
         } else {
           // circle vs tile rect
@@ -486,32 +491,38 @@ function shade(base, amt) {
 var C_OCEAN = [22, 68, 150], C_WATER = [52, 152, 219],
     C_SAND = [238, 220, 130], C_GRASS = [62, 172, 100];
 
-function drawTree(sx, sy, v, leafAlpha, trunkAlpha) {
+function drawTree(sx, sy, tx, ty, leafAlpha, trunkAlpha) {
   // Top-down canopy seen from directly above: leaves only.
   // Trunk is just a circle in the middle, shown only when under the tree.
+  // Every tree gets its own size (1x - 1.35x) and slight look.
+  var sc = treeScale(tx, ty);
+  var pal = (hash2(tx, ty, 43) * 3) | 0;
+  var dark = pal === 2 ? '#0f4d2e' : (pal === 1 ? '#174d1f' : '#14521f');
+  var mid = pal === 2 ? '#1b7a3d' : (pal === 1 ? '#237a35' : '#1e6b2e');
+  var light = pal === 2 ? '#43b953' : (pal === 1 ? '#37ad4c' : '#2fa143');
+  function j(s) { return (hash2(tx, ty, s) - 0.5) * 7; }
+  function blob(dx, dy, r, c) {
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.arc(sx + dx * sc, sy + dy * sc, r * sc, 0, 7); ctx.fill();
+  }
   ctx.globalAlpha = leafAlpha;
-  var dark = '#14521f';
-  var mid = v < 0.5 ? '#1e6b2e' : '#237a35';
-  var light = v < 0.5 ? '#2fa143' : '#37ad4c';
-  ctx.fillStyle = dark;
-  ctx.beginPath(); ctx.arc(sx - 11, sy - 2, 13, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx + 11, sy - 2, 13, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx, sy - 12, 14, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx, sy + 9, 13, 0, 7); ctx.fill();
-  ctx.fillStyle = mid;
-  ctx.beginPath(); ctx.arc(sx - 7, sy - 5, 10, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx + 8, sy - 6, 10, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx, sy + 3, 10, 0, 7); ctx.fill();
-  ctx.fillStyle = light;
-  ctx.beginPath(); ctx.arc(sx - 4, sy - 9, 5, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx + 6, sy + 1, 4, 0, 7); ctx.fill();
+  blob(-11 + j(51), -2 + j(52), 13, dark);
+  blob(11 + j(53), -2 + j(54), 13, dark);
+  blob(j(55), -12 + j(56), 14, dark);
+  blob(j(57), 9 + j(58), 13, dark);
+  blob(-7 + j(59), -5 + j(60), 10, mid);
+  blob(8 + j(61), -6 + j(62), 10, mid);
+  blob(j(63), 3 + j(64), 10, mid);
+  blob(-4 + j(65), -9 + j(66), 5, light);
+  blob(6 + j(67), 1 + j(68), 4, light);
+  if (hash2(tx, ty, 69) < 0.5) blob(2 + j(70), -14 + j(71), 7, mid);
   // the log only shows when you are under the tree
   if (trunkAlpha > 0.01) {
     ctx.globalAlpha = trunkAlpha;
     ctx.fillStyle = '#8a5a33';
     ctx.strokeStyle = '#5d3a1a';
     ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(sx, sy, 6, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(sx, sy, 6 * sc, 0, 7); ctx.fill(); ctx.stroke();
   }
   ctx.globalAlpha = 1;
 }
@@ -636,14 +647,15 @@ function render(t, rdt) {
     for (var tx2 = x0; tx2 <= x1; tx2++) {
       var k = idx(tx2, ty2);
       if (!trees[k]) continue;
+      var tsc = treeScale(tx2, ty2);
       var ccx = tx2 * TILE + TILE / 2, ccy = ty2 * TILE + TILE / 2;
       var pdx = player.x - ccx, pdy = player.y - ccy;
-      var under = (pdx * pdx + pdy * pdy) < 28 * 28;
+      var under = (pdx * pdx + pdy * pdy) < (24 * tsc + 6) * (24 * tsc + 6);
       var target = under ? 0.45 : 1;
       treeA[k] += (target - treeA[k]) * Math.min(1, rdt * 10);
       var trunkTarget = under ? 1 : 0;
       trunkA[k] += (trunkTarget - trunkA[k]) * Math.min(1, rdt * 10);
-      drawTree(ccx, ccy, hash2(tx2, ty2, 31), treeA[k], trunkA[k]);
+      drawTree(ccx, ccy, tx2, ty2, treeA[k], trunkA[k]);
     }
   }
 
