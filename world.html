@@ -485,10 +485,10 @@ function shade(base, amt) {
 var C_OCEAN = [22, 68, 150], C_WATER = [52, 152, 219],
     C_SAND = [238, 220, 130], C_GRASS = [62, 172, 100];
 
-function drawTree(sx, sy, v, alpha) {
+function drawTree(sx, sy, v, leafAlpha) {
   // Top-down canopy seen from directly above: leaves only.
-  // Trunk is just a circle in the middle.
-  ctx.globalAlpha = alpha;
+  // Trunk is just a circle in the middle, always fully visible.
+  ctx.globalAlpha = leafAlpha;
   var dark = '#14521f';
   var mid = v < 0.5 ? '#1e6b2e' : '#237a35';
   var light = v < 0.5 ? '#2fa143' : '#37ad4c';
@@ -504,6 +504,8 @@ function drawTree(sx, sy, v, alpha) {
   ctx.fillStyle = light;
   ctx.beginPath(); ctx.arc(sx - 4, sy - 9, 5, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(sx + 6, sy + 1, 4, 0, 7); ctx.fill();
+  // the log stays fully visible even when the leaves fade
+  ctx.globalAlpha = 1;
   ctx.fillStyle = '#8a5a33';
   ctx.strokeStyle = '#5d3a1a';
   ctx.lineWidth = 2.5;
@@ -634,7 +636,7 @@ function render(t, rdt) {
       var ccx = tx2 * TILE + TILE / 2, ccy = ty2 * TILE + TILE / 2;
       var pdx = player.x - ccx, pdy = player.y - ccy;
       var under = (pdx * pdx + pdy * pdy) < 28 * 28;
-      var target = under ? 0.45 : 1;
+      var target = under ? 0.15 : 1;
       treeA[k] += (target - treeA[k]) * Math.min(1, rdt * 10);
       drawTree(ccx, ccy, hash2(tx2, ty2, 31), treeA[k]);
     }
