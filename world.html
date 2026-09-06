@@ -73,6 +73,7 @@
 <div id="hud">
   <div class="title">🌍 Open World</div>
   <div id="coords">x: 0, y: 0</div>
+  <div id="berries">🫐 Berries: 0</div>
 </div>
 <button id="new-world" type="button">🎲 New World</button>
 <div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
@@ -80,6 +81,7 @@
 'use strict';
 // ---------- Config ----------
 var TILE = 32;
+var ZOOM = 1.6; // zoomed-in camera (map layout unchanged)
 var W = 240, H = 240;               // decently big, but NOT infinite
 var WORLD_PX = W * TILE, WORLD_PY = H * TILE;
 var WATER_LEVEL = 0.30;
@@ -145,7 +147,10 @@ var biome = new Uint8Array(W * H);   // OCEAN/WATER/SAND/GRASS
 var trees = new Uint8Array(W * H);
 var bushes = new Uint8Array(W * H);
 var solid = new Uint8Array(W * H);
+var berryN = new Uint8Array(W * H);   // berries currently on a bush (0-3)
+var berryT = new Float32Array(W * H); // regrow timer per bush
 var seed = 20260906;
+var score = 0, eatCd = 0;
 
 function idx(x, y) { return y * W + x; }
 function inBounds(x, y) { return x >= 0 && y >= 0 && x < W && y < H; }
@@ -283,6 +288,8 @@ function generate(s) {
         solid[i3] = 1;
       } else if (hash2(x, y, seed + 9) < 0.07) {
         bushes[i3] = 1;
+        berryN[i3] = 3;
+        berryT[i3] = 0;
       }
     }
   }
@@ -363,16 +370,19 @@ canvas.addEventListener('touchend', joyEnd);
 canvas.addEventListener('touchcancel', joyEnd);
 
 // ---------- Player ----------
-var player = { x: 0, y: 0, r: 11, fx: 0, fy: 1 };
+var player = { x: 0, y: 0, r: 9, fx: 0, fy: 1 };
 var spawnTile = generate(seed);
 player.x = (spawnTile.x + 0.5) * TILE;
 player.y = (spawnTile.y + 0.5) * TILE;
 var cam = { x: 0, y: 0 };
 var coordsEl = document.getElementById('coords');
+var berriesEl = document.getElementById('berries');
 document.getElementById('new-world').addEventListener('click', function () {
   spawnTile = generate((Math.random() * 1e9) | 0);
   player.x = (spawnTile.x + 0.5) * TILE;
   player.y = (spawnTile.y + 0.5) * TILE;
+  score = 0;
+  berriesEl.textContent = '🫐 Berries: 0';
 });
 
 function hitsSolid(px, py) {
@@ -412,8 +422,40 @@ function update(dt) {
   player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
   player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
 
-  cam.x = Math.max(0, Math.min(WORLD_PX - vw, player.x - vw / 2));
-  cam.y = Math.max(0, Math.min(WORLD_PY - vh, player.y - vh / 2));
+  // Berries regrow over time (mope.io style)
+  for (var bi = 0; bi < W * H; bi++) {
+    if (bushes[bi] && berryN[bi] < 3) {
+      berryT[bi] += dt;
+      if (berryT[bi] > 20) { berryN[bi]++; berryT[bi] = 0; }
+    }
+  }
+  // Munch berries by touching a bush
+  eatCd = Math.max(0, eatCd - dt);
+  if (eatCd <= 0) {
+    var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+    for (var ey = pty - 1; ey <= pty + 1 && eatCd <= 0; ey++) {
+      for (var ex = ptx - 1; ex <= ptx + 1; ex++) {
+        if (!inBounds(ex, ey)) continue;
+        var ei = idx(ex, ey);
+        if (!bushes[ei] || !berryN[ei]) continue;
+        var bcx = (ex + 0.5) * TILE, bcy = (ey + 0.5) * TILE;
+        var bdx = player.x - bcx, bdy = player.y - bcy;
+        if (bdx * bdx + bdy * bdy < (player.r + 15) * (player.r + 15)) {
+          berryN[ei]--;
+          if (berryN[ei] < 3 && berryT[ei] > 20) berryT[ei] = 0;
+          if (!berryN[ei]) berryT[ei] = 0;
+          score++;
+          eatCd = 0.25;
+          berriesEl.textContent = '🫐 Berries: ' + score;
+          break;
+        }
+      }
+    }
+  }
+
+  var viewW = vw / ZOOM, viewH = vh / ZOOM;
+  cam.x = Math.max(0, Math.min(WORLD_PX - viewW, player.x - viewW / 2));
+  cam.y = Math.max(0, Math.min(WORLD_PY - viewH, player.y - viewH / 2));
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
 }
 
@@ -427,57 +469,81 @@ var C_OCEAN = [22, 68, 150], C_WATER = [52, 152, 219],
     C_SAND = [238, 220, 130], C_GRASS = [62, 172, 100];
 
 function drawTree(sx, sy, v) {
+  // Big round mope.io-style tree (much bigger than the player)
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath(); ctx.ellipse(sx, sy + 12, 12, 5, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = '#6b4a2b';
-  ctx.fillRect(sx - 3, sy - 2, 6, 14);
-  var g1 = v < 0.5 ? '#1e6b2e' : '#27933a';
-  var g2 = v < 0.5 ? '#27933a' : '#37ad4c';
-  ctx.fillStyle = g1;
-  ctx.beginPath(); ctx.arc(sx - 7, sy - 8, 10, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx + 7, sy - 8, 10, 0, 7); ctx.fill();
-  ctx.fillStyle = g2;
-  ctx.beginPath(); ctx.arc(sx, sy - 15, 11, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(sx, sy + 17, 16, 6, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#8a5a33';
+  ctx.strokeStyle = '#5d3a1a';
+  ctx.lineWidth = 3;
+  ctx.fillRect(sx - 4, sy - 6, 8, 23);
+  ctx.strokeRect(sx - 4, sy - 6, 8, 23);
+  var dark = '#14521f';
+  var c1 = v < 0.5 ? '#1e6b2e' : '#237a35';
+  var c2 = v < 0.5 ? '#27933a' : '#37ad4c';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = dark;
+  ctx.fillStyle = c1;
+  ctx.beginPath(); ctx.arc(sx - 12, sy - 13, 13, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx + 12, sy - 13, 13, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = c2;
+  ctx.beginPath(); ctx.arc(sx, sy - 26, 15, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath(); ctx.arc(sx - 5, sy - 30, 4, 0, 7); ctx.fill();
 }
-function drawBush(sx, sy, v) {
-  ctx.fillStyle = v < 0.5 ? '#2f9e44' : '#40b355';
-  ctx.beginPath(); ctx.arc(sx - 5, sy + 2, 6, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx + 5, sy + 2, 6, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(sx, sy - 3, 7, 0, 7); ctx.fill();
+function drawBush(sx, sy, v, n) {
+  // Round mope.io-style berry bush with edible berries
+  ctx.fillStyle = v < 0.5 ? '#2f9e44' : '#37ad4c';
+  ctx.strokeStyle = '#1d6b2c';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(sx - 6, sy + 3, 8, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx + 6, sy + 3, 8, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx, sy - 4, 9, 0, 7); ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#e1306c';
-  if (v > 0.6) { ctx.beginPath(); ctx.arc(sx + 2, sy - 4, 2, 0, 7); ctx.fill(); }
+  ctx.strokeStyle = '#a3123f';
+  ctx.lineWidth = 1.5;
+  for (var k = 0; k < n; k++) {
+    var a = hash2((sx | 0) + k * 13, (sy | 0) + k * 29, 77) * Math.PI * 2;
+    var bx = sx + Math.cos(a) * 8, by = sy - 1 + Math.sin(a) * 7;
+    ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill(); ctx.stroke();
+  }
 }
 function drawPlayer(sx, sy, t) {
-  var bob = Math.sin(t / 130) * 1.5;
+  // Small round explorer (smaller than a tree)
+  var bob = Math.sin(t / 130) * 1.2;
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath(); ctx.ellipse(sx, sy + 11, 10, 4, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = '#0d47a1';
-  ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 11, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(sx, sy + 9, 8, 3.5, 0, 0, 7); ctx.fill();
   ctx.fillStyle = '#2196f3';
-  ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 7.5, 0, 7); ctx.fill();
-  ctx.fillStyle = '#ffcc99';
-  ctx.beginPath(); ctx.arc(sx, sy - 2 + bob * 0.4, 5, 0, 7); ctx.fill();
-  // facing nose
-  ctx.fillStyle = '#ffcc99';
-  ctx.beginPath();
-  ctx.arc(sx + player.fx * 9, sy + bob * 0.4 + player.fy * 9, 3, 0, 7);
-  ctx.fill();
+  ctx.strokeStyle = '#0d47a1';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 9, 0, 7); ctx.fill(); ctx.stroke();
+  // eyes look toward movement
+  var ex = -player.fy, ey = player.fx;
+  var cx = sx + player.fx * 3.5, cy = sy + bob * 0.4 + player.fy * 3.5;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(cx + ex * 3.6, cy + ey * 3.6, 2.6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx - ex * 3.6, cy - ey * 3.6, 2.6, 0, 7); ctx.fill();
+  ctx.fillStyle = '#10233f';
+  ctx.beginPath(); ctx.arc(cx + ex * 3.6 + player.fx, cy + ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx - ex * 3.6 + player.fx, cy - ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
 }
 
 function render(t) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#0b1020';
   ctx.fillRect(0, 0, vw, vh);
+  var viewW = vw / ZOOM, viewH = vh / ZOOM;
   var x0 = Math.max(0, Math.floor(cam.x / TILE));
   var y0 = Math.max(0, Math.floor(cam.y / TILE));
-  var x1 = Math.min(W - 1, Math.ceil((cam.x + vw) / TILE));
-  var y1 = Math.min(H - 1, Math.ceil((cam.y + vh) / TILE));
+  var x1 = Math.min(W - 1, Math.ceil((cam.x + viewW) / TILE));
+  var y1 = Math.min(H - 1, Math.ceil((cam.y + viewH) / TILE));
   var x, y;
+  ctx.setTransform(dpr * ZOOM, 0, 0, dpr * ZOOM, -cam.x * dpr * ZOOM, -cam.y * dpr * ZOOM);
 
   for (y = y0; y <= y1; y++) {
     for (x = x0; x <= x1; x++) {
       var i = idx(x, y);
       var b = biome[i];
-      var sx = x * TILE - cam.x, sy = y * TILE - cam.y;
+      var sx = x * TILE, sy = y * TILE;
       var v = hash2(x, y, 21) - 0.5;
       if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
       else if (b === WATER) ctx.fillStyle = shade(C_WATER, v * 12);
@@ -518,8 +584,8 @@ function render(t) {
     }
   }
 
-  // Y-sorted objects + player
-  var px = player.x - cam.x, py = player.y - cam.y;
+  // Y-sorted objects + player (world coords; zoom transform is active)
+  var px = player.x, py = player.y;
   var drewPlayer = false;
   var drawables = [];
   for (y = y0; y <= y1; y++) {
@@ -532,13 +598,17 @@ function render(t) {
   for (var d = 0; d < drawables.length; d++) {
     var oy = drawables[d][0];
     if (!drewPlayer && player.y < oy) { drawPlayer(px, py, t); drewPlayer = true; }
-    var ox = drawables[d][1] * TILE + TILE / 2 - cam.x;
-    var oyy = drawables[d][2] * TILE + TILE / 2 - cam.y;
+    var ox = drawables[d][1] * TILE + TILE / 2;
+    var oyy = drawables[d][2] * TILE + TILE / 2;
     var vv = hash2(drawables[d][1], drawables[d][2], 31);
-    if (trees[idx(drawables[d][1], drawables[d][2])]) drawTree(ox, oyy, vv);
-    else drawBush(ox, oyy, vv);
+    var ti = idx(drawables[d][1], drawables[d][2]);
+    if (trees[ti]) drawTree(ox, oyy, vv);
+    else drawBush(ox, oyy, vv, berryN[ti]);
   }
   if (!drewPlayer) drawPlayer(px, py, t);
+
+  // Screen-space UI (joystick, minimap)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   // Touch joystick visual
   if (joy.active) {
