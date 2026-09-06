@@ -25,12 +25,15 @@
         stroke-linecap="round" fill="none"/>
   <ellipse cx="160" cy="95" rx="20" ry="13" fill="#3498db"/>
   <g filter="url(#glow)">
-    <polygon points="70,60 78,44 86,60" fill="#1e6b2e"/>
-    <rect x="76.5" y="60" width="3" height="7" fill="#6b4a2b"/>
-    <polygon points="95,75 103,59 111,75" fill="#27933a"/>
-    <rect x="101.5" y="75" width="3" height="7" fill="#6b4a2b"/>
-    <polygon points="150,55 158,39 166,55" fill="#1e6b2e"/>
-    <rect x="156.5" y="55" width="3" height="7" fill="#6b4a2b"/>
+    <circle cx="78" cy="55" r="13" fill="#1e6b2e"/>
+    <circle cx="74" cy="51" r="6" fill="#2fa143"/>
+    <circle cx="78" cy="55" r="4" fill="#8a5a33"/>
+    <circle cx="103" cy="70" r="13" fill="#237a35"/>
+    <circle cx="99" cy="66" r="6" fill="#37ad4c"/>
+    <circle cx="103" cy="70" r="4" fill="#8a5a33"/>
+    <circle cx="158" cy="50" r="13" fill="#1e6b2e"/>
+    <circle cx="154" cy="46" r="6" fill="#2fa143"/>
+    <circle cx="158" cy="50" r="4" fill="#8a5a33"/>
   </g>
   <circle cx="90" cy="105" r="5" fill="#2f9e44"/>
   <circle cx="100" cy="108" r="4" fill="#40b355"/>
