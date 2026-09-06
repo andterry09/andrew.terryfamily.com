@@ -607,7 +607,10 @@ document.getElementById('new-world').addEventListener('click', function () {
 });
 
 function treeScale(tx, ty) { return 1.8 + hash2(tx, ty, 41) * 0.4; } // 1.8 - 2.2x
-function bushScale(tx, ty) { return 1.5 + hash2(tx, ty, 83) * 0.7; } // 1.5 - 2.2x
+function bushScale(tx, ty) {
+  if (open[idx(tx, ty)]) return 1.0 + hash2(tx, ty, 83) * 0.5; // fields: 1.0 - 1.5x
+  return 1.5 + hash2(tx, ty, 83) * 0.7; // forests: 1.5 - 2.2x
+}
 function stumpScale(tx, ty) { return 1.2 + hash2(tx, ty, 111) * 0.3; } // 1.2 - 1.5x
 function logScale(tx, ty) { return 1.7 + hash2(tx, ty, 131) * 0.8; } // 1.7x - 2.5x
 function mushScale(tx, ty, k) { return 0.8 + hash2(tx + k * 13, ty + k * 29, 133) * 1.0; } // 0.8x - 1.8x
