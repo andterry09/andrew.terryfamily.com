@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+  <defs>
+    <linearGradient id="ice" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e8f9ff"/>
+      <stop offset="1" stop-color="#9fd8f5"/>
+    </linearGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="240" height="160" rx="16" fill="url(#ice)"/>
+  <polygon points="30,140 90,20 120,20 60,140" fill="#ffffff" opacity="0.45"/>
+  <polygon points="120,140 180,20 195,20 135,140" fill="#ffffff" opacity="0.3"/>
+  <g filter="url(#soft)">
+    <circle cx="70" cy="95" r="24" fill="#e74c3c"/>
+    <circle cx="125" cy="70" r="28" fill="#1abc9c"/>
+    <circle cx="178" cy="100" r="21" fill="#9b59b6"/>
+  </g>
+  <ellipse cx="62" cy="87" rx="7" ry="4" fill="#fff" opacity="0.7" transform="rotate(-25 62 87)"/>
+  <ellipse cx="115" cy="60" rx="8" ry="4.5" fill="#fff" opacity="0.7" transform="rotate(-25 115 60)"/>
+  <ellipse cx="171" cy="93" rx="6" ry="3.5" fill="#fff" opacity="0.7" transform="rotate(-25 171 93)"/>
+  <ellipse cx="70" cy="132" rx="26" ry="5" fill="#5aa9d6" opacity="0.5"/>
+  <ellipse cx="125" cy="132" rx="30" ry="5" fill="#5aa9d6" opacity="0.5"/>
+  <ellipse cx="178" cy="132" rx="23" ry="5" fill="#5aa9d6" opacity="0.5"/>
+</svg>

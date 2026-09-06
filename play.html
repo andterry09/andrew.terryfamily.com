@@ -65,7 +65,7 @@
       margin-bottom: 14px;
       flex-wrap: wrap;
     }
-    .player-icon { font-size: 2.2rem; }
+    .player-icon { width: 60px; height: 44px; object-fit: cover; border-radius: 10px; box-shadow: 0 2px 8px #0006; }
     .player-title { font-size: 1.6rem; font-weight: bold; color: #ffd700; margin: 0; }
     .player-head .spacer { flex: 1; }
     .tool-btn {
@@ -160,7 +160,7 @@
       transition: transform 0.15s, box-shadow 0.15s;
     }
     .rel-card:hover { transform: translateY(-4px) scale(1.03); box-shadow: 0 8px 32px #0007; }
-    .rel-card .icon { font-size: 2rem; }
+    .rel-card .icon { width: 100%; height: 90px; object-fit: cover; border-radius: 10px; }
     .rel-card .name { font-weight: bold; color: #ffd700; margin: 8px 0 10px 0; }
     .rel-card .go {
       display: inline-block;
@@ -195,7 +195,7 @@
   <div class="wrap" id="content" style="display:none;">
     <div class="player-card">
       <div class="player-head">
-        <span class="player-icon" id="game-icon">🎮</span>
+        <img class="player-icon" id="game-icon" alt="Game logo">
         <h1 class="player-title" id="game-title">Game</h1>
         <span class="spacer"></span>
         <button class="tool-btn" id="restart-btn" type="button">↻ Restart</button>
@@ -238,77 +238,77 @@
     var GAMES = {
       "square": {
         title: "Square Clicker",
-        icon: "🟨",
+        thumb: "thumbs/square.svg",
         src: "new-game/square.html",
         desc: "A fast-paced clicking game. Click the square to earn money, then spend it on upgrades that boost your earnings per click and per second.",
         controls: "Click the square to earn. Buy upgrades with your earnings. Progress saves automatically."
       },
       "platformer": {
         title: "Simple 3D Platformer",
-        icon: "🏃",
+        thumb: "thumbs/platformer.svg",
         src: "platformer-game.html",
         desc: "Jump and move in a 3D world! Navigate platforms, avoid falling, and reach the goal in each level.",
         controls: "Move with Arrow keys, jump with Arrow Up. Reach the goal without falling."
       },
       "explore": {
         title: "Terrain Adventure",
-        icon: "🗺️",
+        thumb: "thumbs/explore.svg",
         src: "new-game/explore.html",
         desc: "Explore a procedurally generated infinite terrain. Walk across land, water, sand, and rocks — and watch out for enemies!",
         controls: "Move with Arrow keys. Press Space for a spin attack. Press R to restart after game over."
       },
       "tower": {
         title: "Wizard Tower",
-        icon: "🧙",
+        thumb: "thumbs/tower.svg",
         src: "tower.html",
         desc: "Defeat monsters, dodge traps, collect powerups, and climb the tower in this elemental action game!",
         controls: "Move with Arrow keys / WASD. Cast with J (fire), K (ice), L (lightning). Switch elements with 1 / 2 / 3."
       },
       "typing": {
         title: "Galactic Typing Defense",
-        icon: "⌨️",
+        thumb: "thumbs/typing.svg",
         src: "typing.html",
         desc: "Type words to shoot down the enemy words and defend your base! Survive waves and level up.",
         controls: "Type an enemy word and press Enter to shoot it. Move your ship with Left / Right arrows."
       },
       "color": {
         title: "Color Combo Memory Game",
-        icon: "🎨",
+        thumb: "thumbs/color.svg",
         src: "color.html",
         desc: "Follow which colors light up, then copy the sequence to get a new high score!",
         controls: "Press Start, watch the sequence, then click the colors in the same order."
       },
       "merge": {
         title: "Merge Vehicles",
-        icon: "🚗",
+        thumb: "thumbs/merge.svg",
         src: "v.html",
         desc: "Merge to create new vehicles and put them on the road to earn more money!",
         controls: "Buy cars, drag two matching cars together to merge them. Drag cars onto the road to earn money over time."
       },
       "base": {
         title: "Base Defense",
-        icon: "🛡️",
+        thumb: "thumbs/base.svg",
         src: "base.html",
         desc: "Buy and upgrade shooters to protect your base against waves of enemies!",
         controls: "Use the panel to buy and upgrade shooters. Survive as many waves as you can."
       },
       "bounce": {
         title: "Bounce Higher!",
-        icon: "🏀",
+        thumb: "thumbs/bounce.svg",
         src: "comp/index.html",
         desc: "Bounce your way up through challenging platforms and reach new heights!",
         controls: "Move with Left / Right arrows (or A / D). Land on platforms to bounce higher. Don't fall!"
       },
       "circles": {
         title: "Circles on Ice",
-        icon: "⭕",
+        thumb: "thumbs/circles.svg",
         src: "shooter.html",
         desc: "Move circles on a slippery ice surface in this unique physics game! Play solo or with a friend, including tag mode.",
         controls: "Player 1: Arrow keys. Player 2: WASD. Press Space to start. Try Tag mode for a twist!"
       },
       "draw": {
         title: "Color Draw",
-        icon: "✏️",
+        thumb: "thumbs/draw.svg",
         src: "h.html",
         desc: "Express your creativity with this fun drawing and painting game!",
         controls: "Click and drag to draw. Pick colors and brush size from the palette at the bottom."
@@ -333,7 +333,9 @@
       document.title = 'Game not found - Gamli';
     } else {
       document.getElementById('content').style.display = '';
-      document.getElementById('game-icon').textContent = game.icon;
+      var gameIcon = document.getElementById('game-icon');
+      gameIcon.src = game.thumb;
+      gameIcon.alt = game.title + ' logo';
       document.getElementById('game-title').textContent = game.title;
       document.getElementById('game-desc').textContent = game.desc;
       document.getElementById('game-controls').textContent = game.controls;
@@ -414,9 +416,10 @@
         var a = document.createElement('a');
         a.className = 'rel-card';
         a.href = 'play.html?game=' + encodeURIComponent(key);
-        var icon = document.createElement('div');
+        var icon = document.createElement('img');
         icon.className = 'icon';
-        icon.textContent = g.icon;
+        icon.src = g.thumb;
+        icon.alt = g.title + ' logo';
         var name = document.createElement('div');
         name.className = 'name';
         name.textContent = g.title;

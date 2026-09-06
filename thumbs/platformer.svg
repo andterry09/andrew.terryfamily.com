@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f2027"/>
+      <stop offset="1" stop-color="#2c5364"/>
+    </linearGradient>
+    <linearGradient id="plat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a1887f"/>
+      <stop offset="1" stop-color="#5d4037"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="240" height="160" rx="16" fill="url(#sky)"/>
+  <circle cx="205" cy="26" r="12" fill="#fff9c4" opacity="0.9"/>
+  <rect x="18" y="120" width="90" height="16" rx="6" fill="url(#plat)"/>
+  <rect x="132" y="120" width="90" height="16" rx="6" fill="url(#plat)"/>
+  <rect x="80" y="86" width="80" height="15" rx="6" fill="url(#plat)"/>
+  <rect x="150" y="52" width="60" height="14" rx="6" fill="url(#plat)"/>
+  <rect x="28" y="52" width="52" height="14" rx="6" fill="#ffd700" opacity="0.9"/>
+  <path d="M60 112 Q100 60 165 45" stroke="#ffffff" stroke-opacity="0.5" stroke-width="3" stroke-dasharray="7 6" fill="none"/>
+  <g filter="url(#glow)">
+    <rect x="140" y="18" width="30" height="30" rx="7" fill="#ff7043" transform="rotate(12 155 33)"/>
+    <circle cx="150" cy="28" r="3" fill="#fff"/>
+    <circle cx="161" cy="28" r="3" fill="#fff"/>
+  </g>
+</svg>

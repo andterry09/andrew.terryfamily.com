@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+  <defs>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="240" height="160" rx="16" fill="#1c1c22"/>
+  <g filter="url(#glow)">
+    <circle cx="75" cy="55" r="24" fill="#e74c3c"/>
+    <circle cx="165" cy="55" r="24" fill="#27ae60"/>
+    <circle cx="75" cy="112" r="24" fill="#2980b9"/>
+    <circle cx="165" cy="112" r="24" fill="#f1c40f"/>
+  </g>
+  <circle cx="75" cy="55" r="24" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+  <circle cx="165" cy="55" r="24" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+  <circle cx="75" cy="112" r="24" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+  <circle cx="165" cy="112" r="24" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2"/>
+  <ellipse cx="67" cy="47" rx="7" ry="4" fill="#ffffff" opacity="0.55" transform="rotate(-25 67 47)"/>
+  <ellipse cx="157" cy="47" rx="7" ry="4" fill="#ffffff" opacity="0.55" transform="rotate(-25 157 47)"/>
+  <path d="M120 70 l2.4 5.8 5.8 2.4 -5.8 2.4 -2.4 5.8 -2.4 -5.8 -5.8 -2.4 5.8 -2.4 z" fill="#fff"/>
+</svg>

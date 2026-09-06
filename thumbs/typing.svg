@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+  <defs>
+    <linearGradient id="space" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0a23"/>
+      <stop offset="1" stop-color="#1a1a40"/>
+    </linearGradient>
+    <linearGradient id="laser" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#00ffff"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="240" height="160" rx="16" fill="url(#space)"/>
+  <circle cx="30" cy="25" r="1.8" fill="#fff"/>
+  <circle cx="70" cy="45" r="1.4" fill="#fff"/>
+  <circle cx="200" cy="40" r="1.8" fill="#fff"/>
+  <circle cx="220" cy="95" r="1.4" fill="#fff"/>
+  <circle cx="45" cy="100" r="1.4" fill="#fff"/>
+  <circle cx="160" cy="20" r="1.4" fill="#fff"/>
+  <g filter="url(#glow)">
+    <polygon points="120,60 114,120 126,120" fill="url(#laser)"/>
+    <polygon points="120,118 106,142 134,142" fill="#ff5252"/>
+    <rect x="112" y="140" width="16" height="6" rx="3" fill="#b71c1c"/>
+  </g>
+  <g>
+    <rect x="52" y="96" width="34" height="34" rx="7" fill="#2e2e4d" stroke="#00ffff" stroke-width="2"/>
+    <text x="69" y="121" font-family="sans-serif" font-size="20" font-weight="bold" fill="#fff" text-anchor="middle">A</text>
+    <rect x="103" y="96" width="34" height="34" rx="7" fill="#2e2e4d" stroke="#00ffff" stroke-width="2"/>
+    <text x="120" y="121" font-family="sans-serif" font-size="20" font-weight="bold" fill="#fff" text-anchor="middle">S</text>
+    <rect x="154" y="96" width="34" height="34" rx="7" fill="#2e2e4d" stroke="#00ffff" stroke-width="2"/>
+    <text x="171" y="121" font-family="sans-serif" font-size="20" font-weight="bold" fill="#fff" text-anchor="middle">D</text>
+  </g>
+</svg>

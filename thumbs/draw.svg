@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+  <defs>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff5252"/>
+      <stop offset="0.35" stop-color="#ffd700"/>
+      <stop offset="0.65" stop-color="#40c4ff"/>
+      <stop offset="1" stop-color="#e040fb"/>
+    </linearGradient>
+    <linearGradient id="handle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb74d"/>
+      <stop offset="1" stop-color="#e65100"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="240" height="160" rx="16" fill="#2b2b3a"/>
+  <path d="M20 110 C60 70 90 130 130 95 C160 68 185 100 220 75" stroke="url(#stroke)" stroke-width="11" stroke-linecap="round" fill="none" filter="url(#glow)"/>
+  <circle cx="36" cy="46" r="6" fill="#ff5252"/>
+  <circle cx="58" cy="36" r="6" fill="#ffd700"/>
+  <circle cx="80" cy="36" r="6" fill="#40c4ff"/>
+  <circle cx="102" cy="46" r="6" fill="#69f0ae"/>
+  <g transform="rotate(35 170 60)">
+    <rect x="162" y="18" width="16" height="62" rx="8" fill="url(#handle)"/>
+    <rect x="162" y="78" width="16" height="12" fill="#b0bec5"/>
+    <polygon points="162,90 178,90 170,112" fill="#4a2c2a"/>
+    <circle cx="170" cy="112" r="4" fill="#e040fb"/>
+  </g>
+</svg>
