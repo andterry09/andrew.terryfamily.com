@@ -415,19 +415,22 @@ function generate(s) {
     var qdx = qx - spawn.x, qdy = qy - spawn.y;
     if (qdx * qdx + qdy * qdy < 64) continue;
     if (fbm(qx * 0.03 + 300, qy * 0.03 + 300, 3) <= 0.54) continue;
-    var clear = true;
+    var clear = true, nearTree = false;
     for (var sy2 = qy - 5; sy2 <= qy + 5 && clear; sy2++) {
       for (var sx2 = qx - 5; sx2 <= qx + 5 && clear; sx2++) {
         if (!inBounds(sx2, sy2)) continue;
         var sk = idx(sx2, sy2);
-        if (!trees[sk] && !stumps[sk]) continue;
+        if (!trees[sk] && !stumps[sk] && !logs[sk]) continue;
         var ddx = (qx - sx2) * TILE, ddy = (qy - sy2) * TILE;
         var d2 = ddx * ddx + ddy * ddy;
-        if (trees[sk] && d2 < 70 * 70) clear = false;
-        if (stumps[sk] && d2 < 160 * 160) clear = false;
+        if (trees[sk]) {
+          nearTree = true;
+          if (d2 < 70 * 70) clear = false;
+        }
+        if ((stumps[sk] || logs[sk]) && d2 < 160 * 160) clear = false;
       }
     }
-    if (!clear) continue;
+    if (!clear || !nearTree) continue;
     stumps[qi] = 1;
     solid[qi] = 1;
     stumpsWanted--;
