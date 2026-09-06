@@ -633,6 +633,77 @@ function hitsSolid(px, py) {
   return false;
 }
 
+// Safety net: if the player ever ends up inside something solid
+// (lag spike, edge case), push them back out to its surface.
+function resolveSolids() {
+  var r = player.r - 3;
+  for (var iter = 0; iter < 3; iter++) {
+    var best = 0, bx = 0, by = 0;
+    var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+    for (var ty = pty - 1; ty <= pty + 1; ty++) {
+      for (var tx = ptx - 1; tx <= ptx + 1; tx++) {
+        if (!inBounds(tx, ty)) continue;
+        var ti = idx(tx, ty);
+        if (!solid[ti]) continue;
+        var ox = 0, oy = 0, ov = 0;
+        if (trees[ti] || stumps[ti]) {
+          var trad = trees[ti] ? 7 * treeScale(tx, ty) : 7;
+          var cx = tx * TILE + TILE / 2, cy = ty * TILE + TILE / 2;
+          var dx = player.x - cx, dy = player.y - cy;
+          var d = Math.hypot(dx, dy);
+          if (d < r + trad) {
+            ov = r + trad - d;
+            if (d > 0.001) { ox = dx / d * ov; oy = dy / d * ov; }
+            else { ox = ov; oy = 0; }
+          }
+        } else if (logs[ti]) {
+          var lsc = logScale(tx, ty);
+          var lh = hash2(tx, ty, 121) < 0.5;
+          var lx = tx * TILE + TILE / 2, ly = ty * TILE + TILE / 2;
+          var ex = lh ? 15 * lsc : 0, ey = lh ? 0 : 15 * lsc;
+          var vx = 2 * ex, vy = 2 * ey;
+          var wx = player.x - (lx - ex), wy = player.y - (ly - ey);
+          var c2 = vx * vx + vy * vy;
+          var tt = c2 > 0 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / c2)) : 0;
+          var qx = lx - ex + tt * vx, qy = ly - ey + tt * vy;
+          var qdx = player.x - qx, qdy = player.y - qy;
+          var qd = Math.hypot(qdx, qdy);
+          if (qd < r + 8 * lsc) {
+            ov = r + 8 * lsc - qd;
+            if (qd > 0.001) { ox = qdx / qd * ov; oy = qdy / qd * ov; }
+            else { ox = 0; oy = ov; }
+          }
+        } else {
+          var rx = tx * TILE, ry = ty * TILE;
+          var nx = Math.max(rx, Math.min(player.x, rx + TILE));
+          var ny = Math.max(ry, Math.min(player.y, ry + TILE));
+          var ex2 = player.x - nx, ey2 = player.y - ny;
+          var ed = Math.hypot(ex2, ey2);
+          if (ed < r) {
+            if (ed > 0.001) { ov = r - ed; ox = ex2 / ed * ov; oy = ey2 / ed * ov; }
+            else {
+              var l = player.x - rx, rr2 = rx + TILE - player.x;
+              var tp = player.y - ry, bt = ry + TILE - player.y;
+              var m2 = Math.min(Math.min(l, rr2), Math.min(tp, bt));
+              ov = m2 + r;
+              if (m2 === l) { ox = -ov; oy = 0; }
+              else if (m2 === rr2) { ox = ov; oy = 0; }
+              else if (m2 === tp) { ox = 0; oy = -ov; }
+              else { ox = 0; oy = ov; }
+            }
+          }
+        }
+        if (ov > best) { best = ov; bx = ox; by = oy; }
+      }
+    }
+    if (best <= 0) break;
+    player.x += bx;
+    player.y += by;
+  }
+  player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
+  player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+}
+
 function update(dt) {
   var dx = 0, dy = 0;
   if (keys['a'] || keys['arrowleft']) dx -= 1;
@@ -650,6 +721,7 @@ function update(dt) {
   if (!hitsSolid(player.x, ny)) player.y = ny;
   player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
   player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+  resolveSolids();
 
   // Berries regrow over time (mope.io style)
   for (var bi = 0; bi < W * H; bi++) {
