@@ -1147,17 +1147,27 @@ function traceLevel(level) {
   }
   return loops;
 }
-function fillLevel(level, color) {
+function fillLevel(level, color, rimColor, rimWidth) {
   var loops = traceLevel(level);
   if (!loops.length) return;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  for (var li = 0; li < loops.length; li++) {
-    var lp = loops[li];
-    ctx.moveTo(lp[0][0], lp[0][1]);
-    for (var q = 1; q < lp.length; q++) ctx.lineTo(lp[q][0], lp[q][1]);
-    ctx.closePath();
+  function path() {
+    ctx.beginPath();
+    for (var li = 0; li < loops.length; li++) {
+      var lp = loops[li];
+      ctx.moveTo(lp[0][0], lp[0][1]);
+      for (var q = 1; q < lp.length; q++) ctx.lineTo(lp[q][0], lp[q][1]);
+      ctx.closePath();
+    }
   }
+  if (rimColor) { // sandy rim hugging the shoreline: no second contour to flicker
+    ctx.lineJoin = 'bevel';
+    ctx.strokeStyle = rimColor;
+    ctx.lineWidth = rimWidth;
+    path();
+    ctx.stroke();
+  }
+  ctx.fillStyle = color;
+  path();
   ctx.fill('evenodd');
 }
 function render(t, rdt) {
@@ -1172,11 +1182,11 @@ function render(t, rdt) {
   var x, y;
   ctx.setTransform(dpr * ZOOM, 0, 0, dpr * ZOOM, -cam.x * dpr * ZOOM, -cam.y * dpr * ZOOM);
 
-  // Flat biome bands with sharp angular shores (no grid, no fade, no blobs)
+  // Flat grass base, then water with a sandy rim: a single shoreline,
+  // so nothing flickers while walking and sand rims every shore.
   ctx.fillStyle = 'rgb(62,172,100)';
   ctx.fillRect(cam.x - 4, cam.y - 4, viewW + 8, viewH + 8);
-  fillLevel(SAND_LINE, 'rgb(238,220,130)');
-  fillLevel(WATER_LEVEL, 'rgb(43,110,203)');
+  fillLevel(WATER_LEVEL, 'rgb(43,110,203)', 'rgb(238,220,130)', 48);
 
   for (y = y0; y <= y1; y++) {
     for (x = x0; x <= x1; x++) {
