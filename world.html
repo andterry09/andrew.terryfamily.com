@@ -585,12 +585,12 @@ function generate(s) {
     var sj2 = (rand() * (si2 + 1)) | 0;
     var tmp2 = ccands[si2]; ccands[si2] = ccands[sj2]; ccands[sj2] = tmp2;
   }
-  for (var hi3 = 0; hi3 < ccands.length && crabHoles.length < 6; hi3++) {
+  for (var hi3 = 0; hi3 < ccands.length && crabHoles.length < 30; hi3++) {
     var hx = (ccands[hi3] % W + 0.5) * TILE, hy = (((ccands[hi3] / W) | 0) + 0.5) * TILE;
     var far = true;
     for (var pi = 0; pi < crabHoles.length; pi++) {
       var pdx = hx - crabHoles[pi].x, pdy = hy - crabHoles[pi].y;
-      if (pdx * pdx + pdy * pdy < 200 * 200) { far = false; break; }
+      if (pdx * pdx + pdy * pdy < 120 * 120) { far = false; break; }
     }
     if (!far) continue;
     crabHoles.push({ x: hx, y: hy, state: 'hidden', timer: 8 + ((seed + crabHoles.length * 37) % 40), cx: hx, cy: hy, tx: hx, ty: hy, pause: 0, heading: 0 });
