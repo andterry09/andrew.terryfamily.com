@@ -87,6 +87,7 @@
   <div class="title">🌍 Open World</div>
   <div id="coords">x: 0, y: 0</div>
   <div id="berries">🫐 Berries: 0</div>
+  <div id="shrooms">🍄 Mushrooms: 0</div>
 </div>
 <button id="new-world" type="button">🎲 New World</button>
 <div id="hidden-badge">🤫 Hidden!</div>
@@ -165,6 +166,10 @@ var berryN = new Uint8Array(W * H);   // berries currently on a bush (0-3)
 var berryT = new Float32Array(W * H); // regrow timer per bush
 var litter = new Uint8Array(W * H); // forest floor: 0 none, 1 leaf, 2 leaf, 3 stick
 var stumps = new Uint8Array(W * H); // rare old stumps
+var logs = new Uint8Array(W * H); // fallen leafless logs
+var mushN = new Uint8Array(W * H); // mushrooms on a log (0-3)
+var mushT = new Float32Array(W * H); // mushroom regrow timer
+var mushScore = 0;
 var seed = 20260906;
 var score = 0, eatCd = 0;
 var playerA = 1, wasHiding = false;
@@ -292,7 +297,7 @@ function generate(s) {
   }
 
   // Water is solid; everything else reset
-  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0); stumps.fill(0);
+  trees.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0); stumps.fill(0); logs.fill(0); mushN.fill(0); mushT.fill(0);
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var i0 = idx(x, y);
@@ -428,6 +433,39 @@ function generate(s) {
     stumpsWanted--;
   }
 
+  // A few fallen-over leafless trees (logs) with edible side mushrooms.
+  // Logs lie near standing trees (they fell from them) but never on trunks.
+  var logsWanted = 9, logTries = 0;
+  while (logsWanted > 0 && logTries < 2000) {
+    logTries++;
+    var fx = (rand() * W) | 0, fy = (rand() * H) | 0;
+    var fi = idx(fx, fy);
+    if (biome[fi] !== GRASS || trees[fi] || bushes[fi] || stumps[fi] || logs[fi]) continue;
+    var fdx = fx - spawn.x, fdy = fy - spawn.y;
+    if (fdx * fdx + fdy * fdy < 64) continue;
+    var nearTree = false, fok = true;
+    for (var ly3 = fy - 4; ly3 <= fy + 4 && fok; ly3++) {
+      for (var lx3 = fx - 4; lx3 <= fx + 4 && fok; lx3++) {
+        if (!inBounds(lx3, ly3)) continue;
+        var lk = idx(lx3, ly3);
+        if (!trees[lk] && !stumps[lk] && !logs[lk]) continue;
+        var edx = (fx - lx3) * TILE, edy = (fy - ly3) * TILE;
+        var ed2 = edx * edx + edy * edy;
+        if (trees[lk]) {
+          if (ed2 < 45 * 45) { fok = false; break; }
+          nearTree = true;
+        }
+        if ((stumps[lk] || logs[lk]) && ed2 < 150 * 150) fok = false;
+      }
+    }
+    if (!fok || !nearTree) continue;
+    logs[fi] = 1;
+    solid[fi] = 1;
+    mushN[fi] = 3;
+    mushT[fi] = 0;
+    logsWanted--;
+  }
+
   buildMinimap();
   return spawn;
 }
@@ -447,6 +485,7 @@ function buildMinimap() {
       else if (biome[i] === SAND) { r = 244; g = 226; b = 133; }
       else if (trees[i]) { r = 20; g = 90; b = 40; }
       else if (stumps[i]) { r = 122; g = 90; b = 60; }
+      else if (logs[i]) { r = 110; g = 80; b = 50; }
       img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
     }
   }
@@ -513,16 +552,26 @@ var cam = { x: 0, y: 0 };
 var coordsEl = document.getElementById('coords');
 var berriesEl = document.getElementById('berries');
 var hiddenEl = document.getElementById('hidden-badge');
+var shroomsEl = document.getElementById('shrooms');
 document.getElementById('new-world').addEventListener('click', function () {
   spawnTile = generate((Math.random() * 1e9) | 0);
   player.x = (spawnTile.x + 0.5) * TILE;
   player.y = (spawnTile.y + 0.5) * TILE;
   score = 0;
   berriesEl.textContent = '🫐 Berries: 0';
+  mushScore = 0;
+  shroomsEl.textContent = '🍄 Mushrooms: 0';
 });
 
 function treeScale(tx, ty) { return 1.5 + hash2(tx, ty, 41) * 0.5; } // 1.5 - 2.0x
 function bushScale(tx, ty) { return 1.4 + hash2(tx, ty, 83) * 0.6; } // 1.4 - 2.0x
+function mushPos(tx, ty, k) {
+  var cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
+  var horiz = hash2(tx, ty, 121) < 0.5;
+  var side = hash2(tx, ty, 122) < 0.5 ? 1 : -1;
+  var a = (k - 1) * 12;
+  return horiz ? { x: cx + a, y: cy + side * 11 } : { x: cx + side * 11, y: cy + a };
+}
 
 function hitsSolid(px, py) {
   var r = player.r - 3;
@@ -539,6 +588,18 @@ function hitsSolid(px, py) {
           var trad = trees[ti] ? 7 * treeScale(tx, ty) : 7;
           var tdx = px - tcx, tdy = py - tcy, trr = r + trad;
           if (tdx * tdx + tdy * tdy < trr * trr) return true;
+        } else if (logs[ti]) {
+          // fallen log: capsule (segment) collision
+          var lhoriz = hash2(tx, ty, 121) < 0.5;
+          var lcx = tx * TILE + TILE / 2, lcy = ty * TILE + TILE / 2;
+          var lex = lhoriz ? 15 : 0, ley = lhoriz ? 0 : 15;
+          var lvx = 2 * lex, lvy = 2 * ley;
+          var lwx = px - (lcx - lex), lwy = py - (lcy - ley);
+          var lc1 = lwx * lvx + lwy * lvy;
+          var lc2 = lvx * lvx + lvy * lvy;
+          var ltt = lc2 > 0 ? Math.max(0, Math.min(1, lc1 / lc2)) : 0;
+          var ldx = lwx - ltt * lvx, ldy = lwy - ltt * lvy;
+          if (ldx * ldx + ldy * ldy < (r + 8) * (r + 8)) return true;
         } else {
           // circle vs tile rect
           var nx = Math.max(tx * TILE, Math.min(px, tx * TILE + TILE));
@@ -576,6 +637,10 @@ function update(dt) {
       berryT[bi] += dt;
       if (berryT[bi] > 20) { berryN[bi]++; berryT[bi] = 0; }
     }
+    if (logs[bi] && mushN[bi] < 3) {
+      mushT[bi] += dt;
+      if (mushT[bi] > 20) { mushN[bi]++; mushT[bi] = 0; }
+    }
   }
   // Munch berries by touching a bush
   eatCd = Math.max(0, eatCd - dt);
@@ -596,6 +661,28 @@ function update(dt) {
           eatCd = 0.25;
           berriesEl.textContent = '🫐 Berries: ' + score;
           break;
+        }
+      }
+    }
+  }
+  // Munch mushrooms growing on the side of fallen logs
+  if (eatCd <= 0) {
+    for (var my = pty - 1; my <= pty + 1 && eatCd <= 0; my++) {
+      for (var mx = ptx - 1; mx <= ptx + 1; mx++) {
+        if (!inBounds(mx, my)) continue;
+        var mi = idx(mx, my);
+        if (!logs[mi] || !mushN[mi]) continue;
+        for (var mk = 0; mk < mushN[mi]; mk++) {
+          var mp = mushPos(mx, my, mk);
+          var mdx = player.x - mp.x, mdy = player.y - mp.y;
+          if (mdx * mdx + mdy * mdy < (player.r + 10) * (player.r + 10)) {
+            mushN[mi]--;
+            if (!mushN[mi]) mushT[mi] = 0;
+            mushScore++;
+            eatCd = 0.25;
+            shroomsEl.textContent = '🍄 Mushrooms: ' + mushScore;
+            break;
+          }
         }
       }
     }
@@ -730,6 +817,56 @@ function drawStump(sx, sy, tx, ty) {
   ctx.lineTo(sx + Math.cos(ca) * 7 * sc, sy + Math.sin(ca) * 7 * sc);
   ctx.stroke();
 }
+function drawShroom(x, y) {
+  ctx.fillStyle = '#f5ead2';
+  ctx.beginPath(); ctx.arc(x, y + 1.5, 2.5, 0, 7); ctx.fill();
+  ctx.fillStyle = '#d63d2f';
+  ctx.strokeStyle = '#8e1f16';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(x, y - 1, 4, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x - 1.2, y - 2, 1, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 1.5, y - 0.5, 0.8, 0, 7); ctx.fill();
+}
+function drawLog(sx, sy, tx, ty) {
+  // Fallen leafless tree lying on its side, mushrooms along one flank
+  var horiz = hash2(tx, ty, 121) < 0.5;
+  var L = 23, R = 8;
+  function P(ax, ay) { return horiz ? [sx + ax, sy + ay] : [sx + ay, sy + ax]; }
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + R, L, 4, 0, 0, 7); ctx.fill();
+  var a = P(-L, 0), b = P(L, 0);
+  ctx.strokeStyle = '#4a2f18';
+  ctx.lineWidth = R * 2 + 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  ctx.strokeStyle = '#7a5230';
+  ctx.lineWidth = R * 2 - 2;
+  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  var ends = [P(-L, 0), P(L, 0)];
+  for (var e = 0; e < 2; e++) {
+    ctx.fillStyle = '#c9a06a';
+    ctx.strokeStyle = '#8a5a33';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(ends[e][0], ends[e][1], R - 1.5, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = '#a37c4e';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(ends[e][0], ends[e][1], (R - 1.5) * 0.55, 0, 7); ctx.stroke();
+  }
+  // snapped branch nub on the opposite side from the mushrooms
+  var side = hash2(tx, ty, 122) < 0.5 ? 1 : -1;
+  var off = (hash2(tx, ty, 123) - 0.5) * 20;
+  var n0 = horiz ? [sx + off, sy - side * R] : [sx - side * R, sy + off];
+  var n1 = horiz ? [sx + off, sy - side * (R + 7)] : [sx - side * (R + 7), sy + off];
+  ctx.strokeStyle = '#4a2f18';
+  ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(n0[0], n0[1]); ctx.lineTo(n1[0], n1[1]); ctx.stroke();
+  var mn = mushN[idx(tx, ty)];
+  for (var k = 0; k < mn; k++) {
+    var mp = mushPos(tx, ty, k);
+    drawShroom(mp.x, mp.y); // world coords, zoom transform is active
+  }
+}
 function drawPlayer(sx, sy, t) {
   // Small round explorer (smaller than a tree); fades when hiding
   ctx.globalAlpha = playerA;
@@ -839,7 +976,7 @@ function render(t, rdt) {
   for (y = y0; y <= y1; y++) {
     for (x = x0; x <= x1; x++) {
       var j = idx(x, y);
-      if (bushes[j] || stumps[j]) drawables.push([y * TILE + 12, x, y]);
+      if (bushes[j] || stumps[j] || logs[j]) drawables.push([y * TILE + 12, x, y]);
     }
   }
   drawables.sort(function (a, b2) { return a[0] - b2[0]; });
@@ -851,6 +988,7 @@ function render(t, rdt) {
     var btx = drawables[d][1], bty = drawables[d][2];
     var bti2 = idx(btx, bty);
     if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
+    else if (logs[bti2]) drawLog(ox, oyy, btx, bty);
     else drawBush(ox, oyy, btx, bty, berryN[bti2]);
   }
   if (!drewPlayer) drawPlayer(px, py, t);
