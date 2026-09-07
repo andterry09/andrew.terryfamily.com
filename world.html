@@ -177,12 +177,19 @@ var START_BUNNIES = 30; // rabbits alive when the game starts
 var START_HEDGE = 30; // hedgehogs alive when the game starts
 var MIN_HEDGE = 29; // hedgehog minimum population
 var MAX_HEDGE = 50; // hedgehog maximum population
+var START_SNOW_HOG = 12; // snowy hedgehogs alive when the game starts
+var MIN_SNOW_HOG = 10; // snowy hedgehog minimum population
 var pondFishSpots = []; // every iceless WATER tile (refilled in generate)
 var seaFishSpots = []; // every open-sea OCEAN tile (refilled in generate)
-var hedgehogs = []; // forest hedgehogs
+var hedgehogs = []; // forest + snowy hedgehogs (snow flag marks the white ones)
 var hedgeSpots = []; // forest floor tiles hedgehogs can spawn on (refilled in generate)
+var snowHogSpots = []; // snowy grass tiles white hedgehogs can spawn on (refilled in generate)
+var snowHogCheckT = 0;
 var HOG_COUNT = 20; // warthogs: always exactly this many, never breed or die
 var warthogs = []; // savanna warthogs
+var ARMADILLO_COUNT = 15; // armadillos: always exactly this many, never breed or die
+var armadillos = []; // savanna armadillos
+var armCheckT = 0;
 var hogSpots = []; // savanna grass tiles warthogs can spawn on (refilled in generate)
 var hogCheckT = 0;
 var playerA = 1, wasHiding = false;
@@ -203,11 +210,17 @@ var JACK_START = 30; // jackrabbits alive when the game starts
 var JACK_MIN = 20; // jackrabbit minimum population
 var JACK_MAX = 50; // jackrabbit maximum population
 var SNAKE_COUNT = 20; // rattlesnakes: always exactly this many, never die
+var VULTURE_COUNT = 8; // vultures: always exactly this many, circle the desert, never die
+var SNOWY_OWL_COUNT = 15; // snowy owls: always exactly this many, roam the snow, never die
 var jackBurrows = []; // jackrabbit burrows in the desert sand
 var jacks = []; // desert jackrabbits (big ears, never eat)
 var snakeHoles = []; // rattlesnake burrows in the sand
 var snakes = []; // desert rattlesnakes
-var jackCheckT = 0, snakeCheckT = 0;
+var vultures = []; // desert vultures circling overhead
+var cactusSpots = []; // cactus tiles vultures can perch on (refilled in generate)
+var snowyOwls = []; // snowy owls roaming overhead in the snow
+var pineSpots = []; // pine tiles owls can perch on (refilled in generate)
+var jackCheckT = 0, snakeCheckT = 0, vultCheckT = 0, owlCheckT = 0;
 var desSpots = []; // desert sand tiles snakes can spawn on (refilled in generate)
 var acacias = new Uint8Array(W * H); // umbrella acacia trees on the savanna
 var deadB = new Uint8Array(W * H); // dead bushes on the savanna
@@ -1301,6 +1314,46 @@ function generate(s) {
     placedP++;
   }
 
+  // (pineSpots for owl perches is built at the end of generate, after the
+  // reset block below — building it here would just get wiped.)
+
+  // A few lone trees out in the fields (not many): grassy non-forest tiles
+  // well clear of the woods, sharing the trees' spacing map so crowns never
+  // crowd. Hash-ordered (no rand) so later rand layouts stay exactly as
+  // before. The open-field mask below is computed after this, so burrows
+  // and wildflowers correctly keep their distance from these trees.
+  var fcands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var fi3 = idx(x, y);
+      if (biome[fi3] !== GRASS || snow[fi3] || solid[fi3]) continue;
+      if (savannaAt(x, y)) continue; // the savanna grows acacias instead
+      var fsdx = x - spawn.x, fsdy = y - spawn.y;
+      if (fsdx * fsdx + fsdy * fsdy < 36) continue;
+      if (fbm(x * 0.03 + 300, y * 0.03 + 300, 3) > 0.5) continue; // fields only, not the woods
+      if (hash2(x, y, seed + 613) < 0.03) fcands.push(fi3);
+    }
+  }
+  fcands.sort(function (a, b) {
+    return hash2(a % W, (a / W) | 0, seed + 614) - hash2(b % W, (b / W) | 0, seed + 614);
+  });
+  var placedF = 0;
+  for (var fci = 0; fci < fcands.length && placedF < 30; fci++) {
+    var fcix = fcands[fci];
+    var fcxx = fcix % W, fcyy = (fcix / W) | 0;
+    var fcsc = treeScale(fcxx, fcyy);
+    var fcxp = (fcxx + 0.5) * TILE, fcyp = (fcyy + 0.5) * TILE;
+    if (treeOK(fcxp, fcyp, fcsc, false) === -1) continue; // lone trees stand apart
+    var fid = placedX.length;
+    placedX.push(fcxp); placedY.push(fcyp); placedS.push(fcsc); taken.push(0);
+    var fbix = Math.min(BH - 1, Math.floor(fcyp / BC)) * BW + Math.min(BW - 1, Math.floor(fcxp / BC));
+    if (!buckets[fbix]) buckets[fbix] = [];
+    buckets[fbix].push(fid);
+    trees[fcix] = 1;
+    solid[fcix] = 1;
+    placedF++;
+  }
+
   // Acacias: umbrella thorn trees scattered over the savanna, sharing the
   // trees' spacing map so crowns never crowd. Hash-ordered (no rand) so
   // later rand layouts stay exactly as before.
@@ -1682,12 +1735,19 @@ function generate(s) {
   bunnies = [];
   hedgehogs = [];
   hedgeSpots = [];
+  snowHogSpots = [];
   warthogs = [];
   hogSpots = [];
+  armadillos = [];
+  armCheckT = 0;
   jackBurrows = [];
   jacks = [];
   snakeHoles = [];
   snakes = [];
+  vultures = [];
+  cactusSpots = [];
+  snowyOwls = [];
+  pineSpots = [];
   desSpots = [];
   var bcands = [];
   for (y = 0; y < H; y++) {
@@ -1718,6 +1778,36 @@ function generate(s) {
   while (bunnies.length < START_BUNNIES && burrows.length) {
     spawnBunny(burrows[(Math.random() * burrows.length) | 0], false);
   }
+  // Extra burrows out in the snow, each starting a white-rabbit colony, so
+  // there are plenty of snowy rabbits. Hash-ordered (no rand) so later rand
+  // layouts stay exactly as before.
+  var sbcands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var sbc = idx(x, y);
+      if (biome[sbc] !== GRASS || !open[sbc] || !snow[sbc] || bushes[sbc] || stumps[sbc] || solid[sbc]) continue;
+      sbcands.push(sbc);
+    }
+  }
+  sbcands.sort(function (a, b) {
+    return hash2(a % W, (a / W) | 0, seed + 617) - hash2(b % W, (b / W) | 0, seed + 617);
+  });
+  var snowBurrowsWanted = 3;
+  for (var sbhi = 0; sbhi < sbcands.length && snowBurrowsWanted > 0; sbhi++) {
+    var sbX = (sbcands[sbhi] % W + 0.5) * TILE, sbY = (((sbcands[sbhi] / W) | 0) + 0.5) * TILE;
+    var sbFar = true;
+    for (var sbpi = 0; sbpi < burrows.length; sbpi++) {
+      var sbdx = sbX - burrows[sbpi].x, sbdy = sbY - burrows[sbpi].y;
+      if (sbdx * sbdx + sbdy * sbdy < 150 * 150) { sbFar = false; break; }
+    }
+    if (!sbFar) continue;
+    var sbti = sbcands[sbhi];
+    var sbur = { x: sbX, y: sbY, breedT: 30 + hash2(sbti % W, (sbti / W) | 0, seed + 618) * 30 };
+    burrows.push(sbur);
+    spawnBunny(sbur, false);
+    spawnBunny(sbur, false);
+    snowBurrowsWanted--;
+  }
   // Hedgehogs live in the forest: grassy forest floor, not snow, not solid.
   // The game starts with 30 of them.
   for (y = 0; y < H; y++) {
@@ -1740,6 +1830,25 @@ function generate(s) {
     var hs2 = hedgeSpots[(Math.random() * hedgeSpots.length) | 0];
     spawnHedgehog((hs2 % W + 0.5) * TILE, (((hs2 / W) | 0) + 0.5) * TILE, false);
   }
+  // Snowy hedgehogs live in the snow: white-coated, same habits as forest
+  // ones. The game starts with 12 of them. Hash-ordered (no rand) so later
+  // rand layouts stay exactly as before.
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var shi = idx(x, y);
+      if (biome[shi] !== GRASS || !snow[shi] || solid[shi] || bushes[shi] || stumps[shi]) continue;
+      snowHogSpots.push(shi);
+    }
+  }
+  snowHogSpots.sort(function (a, b) {
+    return hash2(a % W, (a / W) | 0, seed + 615) - hash2(b % W, (b / W) | 0, seed + 615);
+  });
+  var snowHogsWanted = START_SNOW_HOG;
+  for (var shhi = 0; shhi < snowHogSpots.length && snowHogsWanted > 0; shhi++) {
+    var shspot = snowHogSpots[shhi];
+    spawnHedgehog((shspot % W + 0.5) * TILE, (((shspot / W) | 0) + 0.5) * TILE, false, true);
+    snowHogsWanted--;
+  }
   // Warthogs live on the savanna and never leave it: savanna grass only.
   // The game starts with 20, and they never breed or die.
   for (y = 0; y < H; y++) {
@@ -1760,6 +1869,16 @@ function generate(s) {
   while (warthogs.length < HOG_COUNT && hogSpots.length) {
     var hg2 = hogSpots[(Math.random() * hogSpots.length) | 0];
     spawnWarthog((hg2 % W + 0.5) * TILE, (((hg2 / W) | 0) + 0.5) * TILE);
+  }
+  // Armadillos root around the same savanna and never leave it.
+  // The game starts with 15, and they never breed or die.
+  for (var arhi = 0; arhi < hogSpots.length && armadillos.length < ARMADILLO_COUNT; arhi++) {
+    var arspot = hogSpots[arhi];
+    spawnArmadillo((arspot % W + 0.5) * TILE, (((arspot / W) | 0) + 0.5) * TILE);
+  }
+  while (armadillos.length < ARMADILLO_COUNT && hogSpots.length) {
+    var ar2 = hogSpots[(Math.random() * hogSpots.length) | 0];
+    spawnArmadillo((ar2 % W + 0.5) * TILE, (((ar2 / W) | 0) + 0.5) * TILE);
   }
   // Desert life, south-east by the savanna. Cacti and dead trees share the
   // trees' spacing map; jackrabbits and snakes use rand (nothing after but
@@ -1793,6 +1912,13 @@ function generate(s) {
     cactus[cacx] = 1;
     solid[cacx] = 1;
     placedC++;
+  }
+  // Every cactus tile, so vultures can pick one to perch on
+  cactusSpots = [];
+  for (var csy = 0; csy < H; csy++) {
+    for (var csx = 0; csx < W; csx++) {
+      if (cactus[idx(csx, csy)]) cactusSpots.push(idx(csx, csy));
+    }
   }
   // Dead trees: bare grey branches, and no hiding under them
   var dtcands = [];
@@ -1899,6 +2025,30 @@ function generate(s) {
   while (snakes.length < SNAKE_COUNT && desSpots.length) {
     var snk2 = desSpots[(Math.random() * desSpots.length) | 0];
     spawnSnake((snk2 % W + 0.5) * TILE, (((snk2 / W) | 0) + 0.5) * TILE);
+  }
+  // Vultures circling over the desert: always exactly 8, they never die.
+  // They fly, so desSpots are just starting points high above the sand.
+  for (var vlti = 0; vlti < desSpots.length && vultures.length < VULTURE_COUNT; vlti++) {
+    spawnVulture((desSpots[vlti] % W + 0.5) * TILE, (((desSpots[vlti] / W) | 0) + 0.5) * TILE);
+  }
+  while (vultures.length < VULTURE_COUNT && desSpots.length) {
+    var vlt2 = desSpots[(Math.random() * desSpots.length) | 0];
+    spawnVulture((vlt2 % W + 0.5) * TILE, (((vlt2 / W) | 0) + 0.5) * TILE);
+  }
+  // Snowy owls over the snowfields: always exactly 15, they never die.
+  // They start scattered at random spots across the snow (falling back to
+  // pine tops if the snow-spot list is ever empty).
+  // (pineSpots built here at the end so the reset block above can't wipe it.)
+  pineSpots = [];
+  for (var psy = 0; psy < H; psy++) {
+    for (var psx = 0; psx < W; psx++) {
+      if (pines[idx(psx, psy)]) pineSpots.push(idx(psx, psy));
+    }
+  }
+  while (snowyOwls.length < SNOWY_OWL_COUNT && (snowHogSpots.length || pineSpots.length)) {
+    var owlsrc = snowHogSpots.length ? snowHogSpots : pineSpots;
+    var owl2 = owlsrc[(Math.random() * owlsrc.length) | 0];
+    spawnSnowyOwl((owl2 % W + 0.5) * TILE, (((owl2 / W) | 0) + 0.5) * TILE);
   }
 
   buildMinimap();
@@ -2106,8 +2256,9 @@ function spawnBunny(home, baby) {
     craveT: 15 + Math.random() * 20, homeT: 30 + Math.random() * 30
   });
 }
-// A hedgehog (baby or grown) snuffling around the forest
-function spawnHedgehog(x, y, baby) {
+// A hedgehog (baby or grown) snuffling around the forest — or a white one
+// snuffling around the snow when snow is true (same habits, stays on snow)
+function spawnHedgehog(x, y, baby, snowHog) {
   var gsc = 0.85 + Math.random() * 0.35;
   hedgehogs.push({
     x: x + (Math.random() - 0.5) * 16, y: y + (Math.random() - 0.5) * 16,
@@ -2115,6 +2266,7 @@ function spawnHedgehog(x, y, baby) {
     state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
     stx: -1, sty: -1,
     sc: baby ? 0.5 : gsc, gsc: gsc,
+    snow: !!snowHog,
     baby: !!baby, age: 0, lifespan: 300, deathT: 0, fade: 1, nibT: 0,
     craveT: 10 + Math.random() * 15, napT: 25 + Math.random() * 30,
     breedCd: 20 + Math.random() * 20
@@ -2128,14 +2280,20 @@ function hedgeBlocked(px, py) {
   if (b === WATER || b === OCEAN) return true;
   return hitsSolid(px, py);
 }
+// True if a point sits on snowy ground (white hedgehogs never leave it)
+function snowAt(px, py) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  if (!inBounds(tx, ty)) return false;
+  return snow[idx(tx, ty)] === 1;
+}
 // One waddle forward; returns false if something stopped it
 function hedgeStep(hg, sp, dt) {
   var step = sp * dt;
   var ox = hg.x, oy = hg.y;
   var nx = hg.x + Math.cos(hg.heading) * step;
-  if (!hedgeBlocked(nx, hg.y)) hg.x = nx;
+  if (!hedgeBlocked(nx, hg.y) && (!hg.snow || snowAt(nx, hg.y))) hg.x = nx;
   var ny = hg.y + Math.sin(hg.heading) * step;
-  if (!hedgeBlocked(hg.x, ny)) hg.y = ny;
+  if (!hedgeBlocked(hg.x, ny) && (!hg.snow || snowAt(hg.x, ny))) hg.y = ny;
   return Math.hypot(hg.x - ox, hg.y - oy) > step * 0.3;
 }
 // Nearest stump tile that still has mushrooms (tile index, or -1)
@@ -2148,6 +2306,7 @@ function findMushroomStump(hg) {
       if (!inBounds(nx, ny)) continue;
       var ni = idx(nx, ny);
       if (!stumps[ni] || !mushN[ni]) continue;
+      if (hg.snow && !snow[ni]) continue; // white hedgehogs only eat in the snow (no stumps there, so they just wander)
       var d = ox * ox + oy * oy;
       if (d < bd) { bd = d; best = ni; }
     }
@@ -2164,6 +2323,7 @@ function findNapStump(hg) {
       if (!inBounds(nx, ny)) continue;
       var ni = idx(nx, ny);
       if (!stumps[ni]) continue;
+      if (hg.snow && !snow[ni]) continue; // white hedgehogs only nap in the snow (no stumps there, so they just wander)
       var d = ox * ox + oy * oy;
       if (d < bd) { bd = d; best = ni; }
     }
@@ -2180,6 +2340,16 @@ function spawnWarthog(x, y) {
     stx: -1, sty: -1, mtx: -1, mty: -1,
     sc: gsc, nibT: 0, splashT: 0, muddyT: 0,
     craveT: 10 + Math.random() * 15, mudT: 20 + Math.random() * 25
+  });
+}
+// An armadillo snuffling out of the savanna grass. Never dies, never breeds.
+function spawnArmadillo(x, y) {
+  var gsc = 1.1 + Math.random() * 0.3;
+  armadillos.push({
+    x: x + (Math.random() - 0.5) * 16, y: y + (Math.random() - 0.5) * 16,
+    heading: Math.random() * Math.PI * 2,
+    state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
+    sc: gsc
   });
 }
 // True if a warthog can't go there: they never leave the savanna
@@ -2275,7 +2445,7 @@ function jackHop(jk, sp, dt) {
 }
 // A rattlesnake sliding out of the desert sand. Never dies, never breeds.
 function spawnSnake(x, y) {
-  var gsc = 0.9 + Math.random() * 0.3;
+  var gsc = 1.4 + Math.random() * 0.4;
   snakes.push({
     x: x + (Math.random() - 0.5) * 16, y: y + (Math.random() - 0.5) * 16,
     heading: Math.random() * Math.PI * 2,
@@ -2292,6 +2462,104 @@ function snakeBlocked(px, py) {
   var i = idx(tx, ty);
   if (!des[i]) return true;
   return hitsSolid(px, py);
+}
+// A vulture soaring over the desert. Wanders to random spots, never lands,
+// never dies, never breeds — always exactly 8 of them.
+function spawnVulture(x, y) {
+  var gsc = 1.5 + Math.random() * 0.4;
+  var vx = x + (Math.random() - 0.5) * 40, vy = y + (Math.random() - 0.5) * 40;
+  vultures.push({
+    x: vx, y: vy,
+    heading: Math.random() * Math.PI * 2,
+    tx: vx, ty: vy,
+    state: 'fly', perch: -1,
+    timer: 1 + Math.random() * 2,
+    sc: gsc,
+    flap: Math.random() * 10,
+    glideT: Math.random() * 3,
+    speed: 55 + Math.random() * 20
+  });
+}
+// True if another vulture is already landing on / sitting on this cactus
+// tile — only one vulture per cactus at a time.
+function cactusTaken(tile, self) {
+  for (var i = 0; i < vultures.length; i++) {
+    var o = vultures[i];
+    if (o === self) continue;
+    if ((o.state === 'perch' || o.state === 'landing') && o.perch === tile) return true;
+  }
+  return false;
+}
+// A free cactus near the vulture to land on (tile index, or -1 if none)
+function pickFreeCactus(vu) {
+  if (!cactusSpots.length) return -1;
+  var best = -1, bd = 1e12;
+  for (var t = 0; t < 6; t++) { // try a few random cacti, keep the nearest free one
+    var tile = cactusSpots[(Math.random() * cactusSpots.length) | 0];
+    if (cactusTaken(tile, vu)) continue;
+    var cx = (tile % W + 0.5) * TILE, cy = (((tile / W) | 0) + 0.5) * TILE;
+    var dx = cx - vu.x, dy = cy - vu.y;
+    var d = dx * dx + dy * dy;
+    if (d > 700 * 700) continue; // only land nearby, don't cross the map
+    if (d < bd) { bd = d; best = tile; }
+  }
+  return best;
+}
+// A snowy owl roaming the snowfields. Wanders to random spots, rests on
+// pine tops, never dies, never breeds — always exactly 15 of them.
+function spawnSnowyOwl(x, y) {
+  var gsc = 1.7 + Math.random() * 0.4;
+  var ox = x + (Math.random() - 0.5) * 40, oy = y + (Math.random() - 0.5) * 40;
+  snowyOwls.push({
+    x: ox, y: oy,
+    heading: Math.random() * Math.PI * 2,
+    tx: ox, ty: oy,
+    state: 'fly', perch: -1,
+    timer: 1 + Math.random() * 2,
+    sc: gsc,
+    flap: Math.random() * 10,
+    glideT: Math.random() * 3,
+    speed: 50 + Math.random() * 25,
+    prey: null, preySc: 1, gulpT: 0,
+    huntCd: 6 + Math.random() * 10
+  });
+}
+// True if another owl is already landing on / sitting on / eating on this
+// pine top — only one owl per pine at a time.
+function pineTaken(tile, self) {
+  for (var i = 0; i < snowyOwls.length; i++) {
+    var o = snowyOwls[i];
+    if (o === self) continue;
+    if ((o.state === 'perch' || o.state === 'landing' || o.state === 'carry' || o.state === 'eat') && o.perch === tile) return true;
+  }
+  return false;
+}
+// A free pine near the owl to land on (tile index, or -1 if none)
+function pickFreePine(ow) {
+  if (!pineSpots.length) return -1;
+  var best = -1, bd = 1e12;
+  for (var t = 0; t < 6; t++) { // try a few random pines, keep the nearest free one
+    var tile = pineSpots[(Math.random() * pineSpots.length) | 0];
+    if (pineTaken(tile, ow)) continue;
+    var cx = (tile % W + 0.5) * TILE, cy = (((tile / W) | 0) + 0.5) * TILE;
+    var dx = cx - ow.x, dy = cy - ow.y;
+    var d = dx * dx + dy * dy;
+    if (d > 700 * 700) continue; // only land nearby, don't cross the map
+    if (d < bd) { bd = d; best = tile; }
+  }
+  return best;
+}
+// Nearest rabbit an owl can snatch (free ones only — not hiding or held ones)
+function nearestBunny(ow, maxDist) {
+  var best = null, bd = maxDist * maxDist;
+  for (var i = 0; i < bunnies.length; i++) {
+    var bn = bunnies[i];
+    if (bn.state === 'dying' || bn.state === 'inside' || bn.state === 'caught') continue;
+    var dx = bn.x - ow.x, dy = bn.y - ow.y;
+    var d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = bn; }
+  }
+  return best;
 }
 // Nearest jackrabbit to a hungry snake (free ones only — not held ones)
 function nearestJack(sn, maxDist) {
@@ -3106,6 +3374,7 @@ function update(dt) {
   // 50 bunnies on the map.
   for (var bki = bunnies.length - 1; bki >= 0; bki--) {
     var bn = bunnies[bki];
+    if (bn.state === 'caught') continue; // snatched by an owl, dangling in its talons
     if (bn.baby) { // growing up
       bn.age += dt;
       bn.sc = 0.5 + (bn.gsc - 0.5) * Math.min(1, bn.age / 60);
@@ -3218,7 +3487,9 @@ function update(dt) {
     }
   }
   // Hedgehogs: waddle the forest, munch stump mushrooms, nap on stumps.
-  // Babies grow up, old ones fade after 5 minutes. 29-50 on the map.
+  // Babies grow up, old ones fade after 5 minutes. 29-50 on the map, plus
+  // 10+ white ones that do the same thing up in the snow (they never leave
+  // it, and there are no stumps up there so they just wander).
   // Two bumping into each other make a baby.
   for (var hki = hedgehogs.length - 1; hki >= 0; hki--) {
     var hg = hedgehogs[hki];
@@ -3339,7 +3610,7 @@ function update(dt) {
         if (bdx2 * bdx2 + bdy2 * bdy2 < 15 * 15) {
           hga.breedCd = 40 + Math.random() * 30;
           hgb.breedCd = 40 + Math.random() * 30;
-          spawnHedgehog((hga.x + hgb.x) / 2, (hga.y + hgb.y) / 2, true);
+          spawnHedgehog((hga.x + hgb.x) / 2, (hga.y + hgb.y) / 2, true, hga.snow && hgb.snow); // white parents make white babies
           if (hedgehogs.length >= MAX_HEDGE) break;
           break;
         }
@@ -3354,6 +3625,18 @@ function update(dt) {
     while (hedgehogs.length < MIN_HEDGE && hedgeSpots.length) {
       var hs3 = hedgeSpots[(Math.random() * hedgeSpots.length) | 0];
       spawnHedgehog((hs3 % W + 0.5) * TILE, (((hs3 / W) | 0) + 0.5) * TILE, false);
+    }
+  }
+  // Never fewer than 10 snowy hedgehogs: newcomers wander in from the snowfield
+  var snowHogCount = 0;
+  for (var shc = 0; shc < hedgehogs.length; shc++) if (hedgehogs[shc].snow) snowHogCount++;
+  snowHogCheckT += dt;
+  if (snowHogCheckT > 1) {
+    snowHogCheckT = 0;
+    while (snowHogCount < MIN_SNOW_HOG && snowHogSpots.length) {
+      var shs3 = snowHogSpots[(Math.random() * snowHogSpots.length) | 0];
+      spawnHedgehog((shs3 % W + 0.5) * TILE, (((shs3 / W) | 0) + 0.5) * TILE, false, true);
+      snowHogCount++;
     }
   }
   // Warthogs: trot around the savanna, munch acacia puffballs, and wallow
@@ -3451,6 +3734,53 @@ function update(dt) {
     while (warthogs.length < HOG_COUNT && hogSpots.length) {
       var hg4 = hogSpots[(Math.random() * hogSpots.length) | 0];
       spawnWarthog((hg4 % W + 0.5) * TILE, (((hg4 / W) | 0) + 0.5) * TILE);
+    }
+  }
+  // Armadillos: root around the savanna, and curl into an armored ball when
+  // you get too close (only you scare them — nothing else does, and they
+  // never nap on their own). They never breed or die — always exactly 15.
+  for (var ari = 0; ari < armadillos.length; ari++) {
+    var ar = armadillos[ari];
+    var apdx = player.x - ar.x, apdy = player.y - ar.y;
+    var apd2 = apdx * apdx + apdy * apdy;
+    if (ar.state === 'curl') {
+      // balled up in fear: stay curled until you are well away
+      if (apd2 > (5 * TILE) * (5 * TILE)) { ar.state = 'wander'; ar.resting = true; ar.timer = 0.5; }
+      continue;
+    }
+    if (apd2 < TILE * TILE) {
+      // you got too close! curl into an armored ball
+      ar.state = 'curl';
+      continue;
+    }
+    if (ar.state === 'wander') {
+      ar.timer -= dt;
+      if (ar.timer <= 0) {
+        if (ar.resting) {
+          ar.resting = false;
+          ar.heading = Math.random() * Math.PI * 2;
+          ar.timer = 0.6 + Math.random() * 1.2;
+        } else {
+          ar.resting = true;
+          ar.timer = 0.6 + Math.random() * 1.6;
+        }
+      }
+      if (!ar.resting) {
+        if (!hogStep(ar, 50, dt)) { // same savanna-only range as the warthogs
+          ar.heading = Math.random() * Math.PI * 2;
+          ar.resting = true;
+          ar.timer = 0.5;
+        }
+      }
+    }
+  }
+  // Always exactly 15 armadillos (safety net — they never die or breed)
+  armCheckT += dt;
+  if (armCheckT > 1) {
+    armCheckT = 0;
+    while (armadillos.length < ARMADILLO_COUNT && hogSpots.length) {
+      var ar4 = hogSpots[(Math.random() * hogSpots.length) | 0];
+      spawnArmadillo((ar4 % W + 0.5) * TILE, (((ar4 / W) | 0) + 0.5) * TILE);
     }
   }
   // Jackrabbits: desert bunnies with big ears. They hop, visit home, raise
@@ -3630,6 +3960,320 @@ function update(dt) {
     while (snakes.length < SNAKE_COUNT && desSpots.length) {
       var snk3 = desSpots[(Math.random() * desSpots.length) | 0];
       spawnSnake((snk3 % W + 0.5) * TILE, (((snk3 / W) | 0) + 0.5) * TILE);
+    }
+  }
+  // Vultures: wander to random spots over the desert, flapping then gliding,
+  // and every once in a while one lands on a cactus for a rest (only one
+  // vulture per cactus). They fly, so walls and cacti don't stop them — but
+  // they never leave the desert. Always exactly 8, they never die.
+  for (var vli = 0; vli < vultures.length; vli++) {
+    var vu = vultures[vli];
+    if (vu.state === 'perch') {
+      // sitting on a cactus with folded wings; take off after a while
+      vu.flap += dt * 1.5;
+      vu.timer -= dt;
+      if (vu.timer <= 0) {
+        vu.state = 'fly';
+        vu.perch = -1;
+        vu.timer = 0; // pick a fresh wander target right away
+      }
+      continue;
+    }
+    vu.flap += dt * (vu.glideT > 0 ? 3 : 9);
+    if (vu.glideT > 0) vu.glideT -= dt;
+    else if (Math.random() < dt * 0.25) vu.glideT = 1.5 + Math.random() * 2.5;
+    vu.timer -= dt;
+    var vdx = vu.tx - vu.x, vdy = vu.ty - vu.y;
+    if (vu.state === 'landing') {
+      // committed to a cactus — but bail if another vulture took it first
+      if (vu.perch < 0 || cactusTaken(vu.perch, vu)) {
+        vu.state = 'fly'; vu.perch = -1; vu.timer = 0;
+      } else {
+        var pcx = (vu.perch % W + 0.5) * TILE, pcy = (((vu.perch / W) | 0) + 0.5) * TILE;
+        var pdx = pcx - vu.x, pdy = pcy - vu.y;
+        if (pdx * pdx + pdy * pdy < 12 * 12) {
+          // touched down: sit on the cactus for a while
+          vu.state = 'perch';
+          vu.timer = 7 + Math.random() * 9;
+          vu.x = pcx; vu.y = pcy;
+          continue;
+        }
+        vu.tx = pcx; vu.ty = pcy; // glide straight at the cactus, no retargeting
+        vdx = vu.tx - vu.x; vdy = vu.ty - vu.y;
+      }
+    }
+    if (vu.state === 'fly') {
+      if (vu.timer <= 0 || vdx * vdx + vdy * vdy < 40 * 40) {
+        vu.timer = 4 + Math.random() * 5;
+        var free = -1;
+        if (Math.random() < 0.3) free = pickFreeCactus(vu); // every once in a while, rest
+        if (free !== -1) {
+          vu.state = 'landing'; vu.perch = free;
+          vu.tx = (free % W + 0.5) * TILE; vu.ty = (((free / W) | 0) + 0.5) * TILE;
+        } else {
+          // pick a new random spot to wander to (any direction, a few tiles out)
+          var va = Math.random() * Math.PI * 2;
+          var vd = 120 + Math.random() * 280;
+          vu.tx = vu.x + Math.cos(va) * vd;
+          vu.ty = vu.y + Math.sin(va) * vd;
+          if (vu.tx < 8) vu.tx = 8; else if (vu.tx > WORLD_PX - 8) vu.tx = WORLD_PX - 8;
+          if (vu.ty < 8) vu.ty = 8; else if (vu.ty > WORLD_PY - 8) vu.ty = WORLD_PY - 8;
+        }
+        vu.speed = 50 + Math.random() * 30;
+        vdx = vu.tx - vu.x; vdy = vu.ty - vu.y;
+      }
+    }
+    // bank toward the target with a limited turn rate, plus a smooth gentle
+    // sway so the path wanders instead of flying perfect circles
+    var want = Math.atan2(vdy, vdx);
+    var dw = want - vu.heading;
+    while (dw > Math.PI) dw -= Math.PI * 2;
+    while (dw < -Math.PI) dw += Math.PI * 2;
+    vu.heading += Math.max(-1, Math.min(1, dw)) * 2.5 * dt + Math.sin(vu.flap * 0.35 + 1.3) * 0.35 * dt;
+    var vnx = vu.x + Math.cos(vu.heading) * vu.speed * dt;
+    var vny = vu.y + Math.sin(vu.heading) * vu.speed * dt;
+    // steer back when the next spot leaves the desert (flyers ignore solids,
+    // so they may cross water briefly on the way home — but never freeze)
+    var vtx = Math.floor(vnx / TILE), vty = Math.floor(vny / TILE);
+    var vDes = inBounds(vtx, vty) && des[idx(vtx, vty)];
+    if (!vDes) {
+      // bank back toward the middle of the desert (55, 175)
+      var homeA = Math.atan2((175 + 0.5) * TILE - vu.y, (55 + 0.5) * TILE - vu.x);
+      var dh = homeA - vu.heading;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      // already off-desert (over ocean): point straight home and fly, so it
+      // can never hover stuck waiting for a desert tile to come to it
+      var ctx0 = Math.floor(vu.x / TILE), cty0 = Math.floor(vu.y / TILE);
+      if (!inBounds(ctx0, cty0) || !des[idx(ctx0, cty0)]) vu.heading = homeA;
+      else vu.heading += Math.max(-1, Math.min(1, dh)) * 3.5 * dt;
+      vnx = vu.x + Math.cos(vu.heading) * vu.speed * dt;
+      vny = vu.y + Math.sin(vu.heading) * vu.speed * dt;
+    }
+    // keep inside the world (clamp instead of freezing in place)
+    if (vnx < 8) vnx = 8; else if (vnx > WORLD_PX - 8) vnx = WORLD_PX - 8;
+    if (vny < 8) vny = 8; else if (vny > WORLD_PY - 8) vny = WORLD_PY - 8;
+    vu.x = vnx; vu.y = vny;
+  }
+  // Always exactly 8 vultures (safety net — they never die or breed)
+  vultCheckT += dt;
+  if (vultCheckT > 1) {
+    vultCheckT = 0;
+    while (vultures.length < VULTURE_COUNT && desSpots.length) {
+      var vlt3 = desSpots[(Math.random() * desSpots.length) | 0];
+      spawnVulture((vlt3 % W + 0.5) * TILE, (((vlt3 / W) | 0) + 0.5) * TILE);
+    }
+  }
+  // Snowy owls: wander to random spots over the snow, flapping then gliding,
+  // and every once in a while one lands on a pine top for a rest (only one
+  // owl per pine). They fly, so trunks don't stop them — but they never
+  // leave the snow. Always exactly 15, they never die.
+  for (var owi2 = 0; owi2 < snowyOwls.length; owi2++) {
+    var ow = snowyOwls[owi2];
+    if (ow.state === 'perch') {
+      // sitting on a pine top with folded wings; take off after a while
+      ow.flap += dt * 1.5;
+      ow.timer -= dt;
+      if (ow.timer <= 0) {
+        ow.state = 'fly';
+        ow.perch = -1;
+        ow.timer = 0; // pick a fresh wander target right away
+      }
+      continue;
+    }
+    if (ow.state === 'eat') {
+      // eating at the beak: the rabbit hangs there, thrashing less and less
+      // as it gets swallowed, until nothing is left
+      ow.flap += dt * 1.5;
+      ow.gulpT -= dt;
+      var oep = ow.prey;
+      if (oep && bunnies.indexOf(oep) !== -1) {
+        var oprog = Math.max(0, Math.min(1, 1 - ow.gulpT / 7));
+        var oeshak = (1 - oprog) * 3 * ow.sc;
+        oep.x = ow.x + Math.cos(ow.heading) * 13 * ow.sc + (Math.random() - 0.5) * 2 * oeshak;
+        oep.y = ow.y + Math.sin(ow.heading) * 13 * ow.sc + (Math.random() - 0.5) * 2 * oeshak;
+        oep.heading = ow.heading + Math.sin(ow.flap * 2) * 0.5 * (1 - oprog);
+        oep.sc = Math.max(0.25, ow.preySc * (1 - oprog * 0.75)); // sinks into the beak
+      }
+      if (ow.gulpT <= 0) {
+        if (oep) { var oepi = bunnies.indexOf(oep); if (oepi !== -1) bunnies.splice(oepi, 1); }
+        ow.prey = null; ow.state = 'fly'; ow.perch = -1; ow.timer = 0;
+      }
+      continue;
+    }
+    if (ow.state === 'hunt') {
+      // diving at a rabbit! fast and direct, flapping hard
+      var opr = ow.prey;
+      if (!opr || bunnies.indexOf(opr) === -1 || opr.state === 'dying' || opr.state === 'inside') {
+        ow.prey = null; ow.state = 'fly'; ow.timer = 1 + Math.random() * 2;
+      } else {
+        ow.timer -= dt;
+        ow.glideT = 0;
+        ow.heading = Math.atan2(opr.y - ow.y, opr.x - ow.x);
+        var ohdx = opr.x - ow.x, ohdy = opr.y - ow.y;
+        if (ohdx * ohdx + ohdy * ohdy < 14 * 14) {
+          // snatched! carry the rabbit to a pine top to eat it
+          var feast = pickFreePine(ow);
+          if (feast === -1) { // nowhere to eat: let it go unharmed
+            opr.state = 'hop'; opr.resting = true; opr.timer = 0.5;
+            ow.prey = null; ow.state = 'fly'; ow.timer = 1 + Math.random() * 2;
+          } else {
+            opr.state = 'caught';
+            ow.preySc = opr.sc; // remember its size for the beak meal later
+            ow.perch = feast;
+            ow.state = 'carry';
+            ow.huntCd = 10 + Math.random() * 15;
+          }
+        } else {
+          var odstep = 115 * dt;
+          var odnx = ow.x + Math.cos(ow.heading) * odstep;
+          var odny = ow.y + Math.sin(ow.heading) * odstep;
+          // hunting dives may briefly leave the snow — it flies home after
+          if (odnx < 8) odnx = 8; else if (odnx > WORLD_PX - 8) odnx = WORLD_PX - 8;
+          if (odny < 8) odny = 8; else if (odny > WORLD_PY - 8) odny = WORLD_PY - 8;
+          ow.x = odnx; ow.y = odny;
+          if (ow.timer <= 0) { ow.prey = null; ow.state = 'fly'; ow.timer = 1 + Math.random() * 2; }
+        }
+      }
+      continue;
+    }
+    if (ow.state === 'carry') {
+      // rabbit in the talons, flying it up to a pine top
+      var opc = ow.prey;
+      if (!opc || bunnies.indexOf(opc) === -1 || opc.state === 'dying') {
+        ow.prey = null; ow.state = 'fly'; ow.perch = -1; ow.timer = 1 + Math.random() * 2;
+      } else if (ow.perch < 0 || pineTaken(ow.perch, ow)) {
+        // pine taken mid-flight: let the rabbit go, head home
+        opc.state = 'hop'; opc.resting = true; opc.timer = 0.5; opc.sc = ow.preySc;
+        ow.prey = null; ow.state = 'fly'; ow.perch = -1; ow.timer = 0;
+      } else {
+        var occx = (ow.perch % W + 0.5) * TILE, occy = (((ow.perch / W) | 0) + 0.5) * TILE;
+        ow.heading = Math.atan2(occy - ow.y, occx - ow.x);
+        var ocdx = occx - ow.x, ocdy = occy - ow.y;
+        if (ocdx * ocdx + ocdy * ocdy < 14 * 14) {
+          // home to the pine: eat the rabbit at the beak (a long, slow meal)
+          ow.x = occx; ow.y = occy;
+          ow.gulpT = 7;
+          ow.state = 'eat';
+        } else {
+          var ocstep = 95 * dt;
+          var ocnx = ow.x + Math.cos(ow.heading) * ocstep;
+          var ocny = ow.y + Math.sin(ow.heading) * ocstep;
+          if (ocnx < 8) ocnx = 8; else if (ocnx > WORLD_PX - 8) ocnx = WORLD_PX - 8;
+          if (ocny < 8) ocny = 8; else if (ocny > WORLD_PY - 8) ocny = WORLD_PY - 8;
+          ow.x = ocnx; ow.y = ocny;
+          // hangs from the beak, shaking hard all the way to the tree
+          var ohsw = Math.sin(ow.flap * 2.2) * 3 * ow.sc;
+          opc.x = ow.x + Math.cos(ow.heading) * 13 * ow.sc - Math.sin(ow.heading) * ohsw + (Math.random() - 0.5) * 5 * ow.sc;
+          opc.y = ow.y + Math.sin(ow.heading) * 13 * ow.sc + Math.cos(ow.heading) * ohsw + 3 * ow.sc + (Math.random() - 0.5) * 5 * ow.sc;
+          opc.heading = ow.heading + Math.sin(ow.flap * 1.7) * 0.6 + (Math.random() - 0.5) * 0.5;
+        }
+      }
+      continue;
+    }
+    ow.flap += dt * (ow.glideT > 0 ? 3 : 9);
+    if (ow.glideT > 0) ow.glideT -= dt;
+    else if (Math.random() < dt * 0.25) ow.glideT = 1.5 + Math.random() * 2.5;
+    ow.huntCd -= dt;
+    ow.timer -= dt;
+    var odx = ow.tx - ow.x, ody = ow.ty - ow.y;
+    if (ow.state === 'landing') {
+      // committed to a pine — but bail if another owl took it first
+      if (ow.perch < 0 || pineTaken(ow.perch, ow)) {
+        ow.state = 'fly'; ow.perch = -1; ow.timer = 0;
+      } else {
+        var opcx = (ow.perch % W + 0.5) * TILE, opcy = (((ow.perch / W) | 0) + 0.5) * TILE;
+        var opdx = opcx - ow.x, opdy = opcy - ow.y;
+        if (opdx * opdx + opdy * opdy < 12 * 12) {
+          // touched down: sit on the pine top for a while
+          ow.state = 'perch';
+          ow.timer = 7 + Math.random() * 9;
+          ow.x = opcx; ow.y = opcy;
+          continue;
+        }
+        ow.tx = opcx; ow.ty = opcy; // glide straight at the pine, no retargeting
+        odx = ow.tx - ow.x; ody = ow.ty - ow.y;
+      }
+    }
+    if (ow.state === 'fly') {
+      if (ow.timer <= 0 || odx * odx + ody * ody < 40 * 40) {
+        ow.timer = 4 + Math.random() * 5;
+        var oacted = false;
+        if (ow.huntCd <= 0) { // hungry: dive at a rabbit and carry it to a pine
+          var oprey = nearestBunny(ow, 380);
+          if (oprey) {
+            ow.prey = oprey; ow.state = 'hunt'; ow.timer = 8; ow.glideT = 0;
+            oacted = true;
+          } else ow.huntCd = 5 + Math.random() * 5; // no rabbits about: check again soon
+        }
+        if (!oacted) {
+          var ofree = -1;
+          if (Math.random() < 0.3) ofree = pickFreePine(ow); // every once in a while, rest
+          if (ofree !== -1) {
+            ow.state = 'landing'; ow.perch = ofree;
+            ow.tx = (ofree % W + 0.5) * TILE; ow.ty = (((ofree / W) | 0) + 0.5) * TILE;
+          } else {
+            // pick a new random spot to wander to (any direction, a few tiles out)
+            var ova = Math.random() * Math.PI * 2;
+            var ovd = 120 + Math.random() * 280;
+            ow.tx = ow.x + Math.cos(ova) * ovd;
+            ow.ty = ow.y + Math.sin(ova) * ovd;
+            if (ow.tx < 8) ow.tx = 8; else if (ow.tx > WORLD_PX - 8) ow.tx = WORLD_PX - 8;
+            if (ow.ty < 8) ow.ty = 8; else if (ow.ty > WORLD_PY - 8) ow.ty = WORLD_PY - 8;
+          }
+        }
+        ow.speed = 50 + Math.random() * 25;
+        odx = ow.tx - ow.x; ody = ow.ty - ow.y;
+      }
+    }
+    // bank toward the target with a limited turn rate, plus a smooth gentle
+    // sway so the path wanders instead of flying perfect circles
+    var owant = Math.atan2(ody, odx);
+    var odw = owant - ow.heading;
+    while (odw > Math.PI) odw -= Math.PI * 2;
+    while (odw < -Math.PI) odw += Math.PI * 2;
+    // close to the end of the snowy place ahead? turn the opposite way:
+    // bank steadily around until facing back into the snow
+    var olahead = TILE * 2.5;
+    var oltx = Math.floor((ow.x + Math.cos(ow.heading) * olahead) / TILE);
+    var olty = Math.floor((ow.y + Math.sin(ow.heading) * olahead) / TILE);
+    var oedge = !inBounds(oltx, olty) || (!snow[idx(oltx, olty)] && !ice[idx(oltx, olty)]);
+    if (oedge) ow.heading += 3.5 * dt;
+    else ow.heading += Math.max(-1, Math.min(1, odw)) * 2.5 * dt;
+    ow.heading += Math.sin(ow.flap * 0.35 + 1.3) * 0.35 * dt;
+    var onx = ow.x + Math.cos(ow.heading) * ow.speed * dt;
+    var ony = ow.y + Math.sin(ow.heading) * ow.speed * dt;
+    // steer back when the next spot leaves the snow and ice (flyers ignore
+    // solids, so they may cross bare ground briefly on the way home — but
+    // never freeze)
+    var otx = Math.floor(onx / TILE), oty = Math.floor(ony / TILE);
+    var oSnow = inBounds(otx, oty) && (snow[idx(otx, oty)] || ice[idx(otx, oty)]);
+    if (!oSnow) {
+      // bank back toward the middle of the snowfield (40, 40)
+      var ohomeA = Math.atan2((40 + 0.5) * TILE - ow.y, (40 + 0.5) * TILE - ow.x);
+      var odh = ohomeA - ow.heading;
+      while (odh > Math.PI) odh -= Math.PI * 2;
+      while (odh < -Math.PI) odh += Math.PI * 2;
+      // already off-snow and off-ice: point straight home and fly, so it
+      // can never hover stuck waiting for a snowy tile to come to it
+      var octx0 = Math.floor(ow.x / TILE), octy0 = Math.floor(ow.y / TILE);
+      if (!inBounds(octx0, octy0) || (!snow[idx(octx0, octy0)] && !ice[idx(octx0, octy0)])) ow.heading = ohomeA;
+      else ow.heading += Math.max(-1, Math.min(1, odh)) * 3.5 * dt;
+      onx = ow.x + Math.cos(ow.heading) * ow.speed * dt;
+      ony = ow.y + Math.sin(ow.heading) * ow.speed * dt;
+    }
+    // keep inside the world (clamp instead of freezing in place)
+    if (onx < 8) onx = 8; else if (onx > WORLD_PX - 8) onx = WORLD_PX - 8;
+    if (ony < 8) ony = 8; else if (ony > WORLD_PY - 8) ony = WORLD_PY - 8;
+    ow.x = onx; ow.y = ony;
+  }
+  // Always exactly 15 snowy owls (safety net — they never die or breed)
+  owlCheckT += dt;
+  if (owlCheckT > 1) {
+    owlCheckT = 0;
+    while (snowyOwls.length < SNOWY_OWL_COUNT && pineSpots.length) {
+      var owl3 = pineSpots[(Math.random() * pineSpots.length) | 0];
+      spawnSnowyOwl((owl3 % W + 0.5) * TILE, (((owl3 / W) | 0) + 0.5) * TILE);
     }
   }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
@@ -4293,6 +4937,13 @@ function drawHedgehog(hg, t) {
   // show, even standing still. Sleepers curl into a round spiky ball.
   var sc = hg.sc * 1.25;
   var sleeping = hg.state === 'nap';
+  // snowy hedgehogs wear a white winter coat, same shape otherwise
+  var snowHog = !!hg.snow;
+  var back = snowHog ? '#b9b2a6' : '#5d4326';
+  var mid = snowHog ? '#e6e1d6' : '#7a5c36';
+  var spike = snowHog ? '#8d877b' : '#3d2c18';
+  var paw = snowHog ? '#c4bcad' : '#9a7650';
+  var face = snowHog ? '#ddd6c7' : '#c9a06a';
   if (sleeping) {
     // curled into a ball: just the spiky body, no head, no paws — breathing slow
     var br = 1 + Math.sin(t / 500) * 0.05;
@@ -4302,11 +4953,11 @@ function drawHedgehog(hg, t) {
     ctx.globalAlpha = hg.fade;
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
     ctx.beginPath(); ctx.ellipse(0, 2 * sc, 9 * sc, 6 * sc, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#5d4326';
+    ctx.fillStyle = back;
     ctx.beginPath(); ctx.ellipse(-1 * sc, 0, 9 * sc, 7 * sc, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#7a5c36';
+    ctx.fillStyle = mid;
     ctx.beginPath(); ctx.ellipse(-1.5 * sc, 0, 7.2 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
-    ctx.strokeStyle = '#3d2c18';
+    ctx.strokeStyle = spike;
     ctx.lineWidth = 1.4 * sc;
     for (var s = 0; s < 12; s++) {
       var sa = (s / 12) * Math.PI * 2 + 0.3;
@@ -4337,17 +4988,17 @@ function drawHedgehog(hg, t) {
   ctx.beginPath(); ctx.ellipse(0, 1.5 * sc, 9 * sc, 6 * sc, 0, 0, 7); ctx.fill();
   // little paws, always out — they paddle when waddling, tuck when resting
   var pad = (!hg.resting) ? Math.sin(t / 90) * 2 * sc : 0;
-  ctx.fillStyle = '#9a7650';
+  ctx.fillStyle = paw;
   ctx.beginPath(); ctx.ellipse(3 * sc + pad * 0.3, -6 * sc, 2.4 * sc, 1.5 * sc, 0.3, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.ellipse(3 * sc - pad * 0.3, 6 * sc, 2.4 * sc, 1.5 * sc, -0.3, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.ellipse(-5 * sc - pad * 0.3, -6 * sc, 2.4 * sc, 1.5 * sc, -0.3, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.ellipse(-5 * sc + pad * 0.3, 6 * sc, 2.4 * sc, 1.5 * sc, 0.3, 0, 7); ctx.fill();
   // round spiky back: dark base with a warm middle
-  ctx.fillStyle = '#5d4326';
+  ctx.fillStyle = back;
   ctx.beginPath(); ctx.ellipse(-1 * sc, 0, 9 * sc, 7 * sc, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = '#7a5c36';
+  ctx.fillStyle = mid;
   ctx.beginPath(); ctx.ellipse(-1.5 * sc, 0, 7.2 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
-  ctx.strokeStyle = '#3d2c18';
+  ctx.strokeStyle = spike;
   ctx.lineWidth = 1.4 * sc;
   for (var q = 0; q < 10; q++) {
     var qa = (q / 10) * Math.PI * 2 + 0.3;
@@ -4358,14 +5009,14 @@ function drawHedgehog(hg, t) {
     ctx.stroke();
   }
   // little round ears with pink insides
-  ctx.fillStyle = '#7a5c36';
+  ctx.fillStyle = mid;
   ctx.beginPath(); ctx.arc(3.5 * sc, -4.6 * sc, 1.7 * sc, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(3.5 * sc, 4.6 * sc, 1.7 * sc, 0, 7); ctx.fill();
   ctx.fillStyle = '#f2a7b8';
   ctx.beginPath(); ctx.arc(3.5 * sc, -4.6 * sc, 0.9 * sc, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(3.5 * sc, 4.6 * sc, 0.9 * sc, 0, 7); ctx.fill();
   // chubby cream face
-  ctx.fillStyle = '#c9a06a';
+  ctx.fillStyle = face;
   ctx.beginPath(); ctx.ellipse(6.5 * sc, 0, 4.4 * sc, 3.8 * sc, 0, 0, 7); ctx.fill();
   // rosy cheeks
   ctx.fillStyle = 'rgba(255,130,150,0.6)';
@@ -4462,6 +5113,85 @@ function drawWarthog(wt, t) {
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.arc(8.3 * sc, -3.3 * sc, 0.35 * sc, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(8.3 * sc, 2.7 * sc, 0.35 * sc, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function drawArmadillo(ar, t) {
+  // Top-down armadillo: grey-brown armored shell with band lines, pointy
+  // snout, long ears and a tapering tail. When scared it tucks into just
+  // its main oval body shell (like a sleeping hedgehog), perfectly still.
+  var sc = ar.sc;
+  ctx.save();
+  ctx.translate(ar.x, ar.y);
+  ctx.rotate(ar.heading);
+  if (ar.state === 'curl') { // tucked into just the main body: perfectly still
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(0, 2 * sc, 9 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#7d7468';
+    ctx.beginPath(); ctx.ellipse(-1 * sc, 0, 9 * sc, 7 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#948b7c';
+    ctx.beginPath(); ctx.ellipse(-1.5 * sc, 0, 7.2 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+    // armadillo bands across the tucked body
+    ctx.strokeStyle = '#575046';
+    ctx.lineWidth = 1.4 * sc;
+    for (var b = -1; b <= 1; b++) {
+      var bbx = -1 * sc + b * 3 * sc;
+      ctx.beginPath();
+      ctx.moveTo(bbx - 1 * sc, -5.8 * sc);
+      ctx.quadraticCurveTo(bbx + 1 * sc, 0, bbx - 1 * sc, 5.8 * sc);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+  var scurry = !ar.resting ? Math.sin(t / 90) * 1.5 * sc : 0;
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(0, 1.5 * sc, 10 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+  // tapering tail with band rings
+  ctx.fillStyle = '#8a8177';
+  ctx.beginPath();
+  ctx.moveTo(-8 * sc, -1.8 * sc); ctx.lineTo(-14 * sc, 0); ctx.lineTo(-8 * sc, 1.8 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#575046';
+  ctx.lineWidth = 1 * sc;
+  ctx.beginPath(); ctx.moveTo(-10 * sc, -1.2 * sc); ctx.lineTo(-10 * sc, 1.2 * sc); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-12 * sc, -0.8 * sc); ctx.lineTo(-12 * sc, 0.8 * sc); ctx.stroke();
+  // stubby legs peeking out, paddling when it scurries
+  ctx.fillStyle = '#6e665c';
+  ctx.beginPath(); ctx.ellipse(3 * sc + scurry * 0.3, -6 * sc, 2.2 * sc, 1.4 * sc, 0.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(3 * sc - scurry * 0.3, 6 * sc, 2.2 * sc, 1.4 * sc, -0.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-4 * sc - scurry * 0.3, -6 * sc, 2.2 * sc, 1.4 * sc, -0.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-4 * sc + scurry * 0.3, 6 * sc, 2.2 * sc, 1.4 * sc, 0.3, 0, 7); ctx.fill();
+  // armored shell with band lines
+  ctx.fillStyle = '#7d7468';
+  ctx.beginPath(); ctx.ellipse(0, 0, 9 * sc, 6.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#948b7c';
+  ctx.beginPath(); ctx.ellipse(0, 0, 7 * sc, 5 * sc, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#575046';
+  ctx.lineWidth = 1.3 * sc;
+  for (var bd = -1; bd <= 1; bd++) {
+    ctx.beginPath();
+    ctx.moveTo(bd * 3 * sc - 1 * sc, -5.4 * sc);
+    ctx.quadraticCurveTo(bd * 3 * sc + 1 * sc, 0, bd * 3 * sc - 1 * sc, 5.4 * sc);
+    ctx.stroke();
+  }
+  // long ears
+  ctx.fillStyle = '#7d7468';
+  ctx.beginPath(); ctx.ellipse(7 * sc, -3.5 * sc, 2.2 * sc, 1.2 * sc, -0.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(7 * sc, 3.5 * sc, 2.2 * sc, 1.2 * sc, 0.5, 0, 7); ctx.fill();
+  // pointy snout with nose
+  ctx.fillStyle = '#8a8177';
+  ctx.beginPath();
+  ctx.moveTo(7 * sc, -2.5 * sc); ctx.lineTo(13 * sc, 0); ctx.lineTo(7 * sc, 2.5 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#3a342c';
+  ctx.beginPath(); ctx.arc(12 * sc, 0, 1 * sc, 0, 7); ctx.fill();
+  // eyes
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(7.5 * sc, -2.6 * sc, 0.9 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(7.5 * sc, 2.6 * sc, 0.9 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(7.7 * sc, -2.8 * sc, 0.3 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(7.7 * sc, 2.4 * sc, 0.3 * sc, 0, 7); ctx.fill();
   ctx.restore();
 }
 function drawJackrabbit(jk, t) {
@@ -4583,6 +5313,236 @@ function drawSnake(sn, t) {
     ctx.moveTo(8 * sc + tl, 0); ctx.lineTo(8 * sc + tl + 2 * sc, 1.5 * sc);
     ctx.stroke();
   }
+  ctx.restore();
+}
+function drawVulture(vu) {
+  // Realistic soaring vulture from above: broad two-tone wings (pale
+  // coverts, near-black flight feathers with slotted primaries), streaked
+  // dark body, fluffy pale ruff, bald reddish head with a hooked ivory
+  // beak. A soft shadow sits below so it reads as flying.
+  var sc = vu.sc;
+  var wing = Math.sin(vu.flap); // -1 tucked .. +1 raised
+  ctx.save();
+  ctx.translate(vu.x, vu.y);
+  if (vu.state === 'perch') {
+    // sitting tight on the cactus: small shadow directly underneath
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(0, 1 * sc, 8 * sc, 4 * sc, 0, 0, 7); ctx.fill();
+  } else {
+    // ground shadow, offset a little behind the bird
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(-6 * sc, 4 * sc, 14 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+  }
+  ctx.rotate(vu.heading);
+  var lift = wing * 3.5 * sc;
+  if (vu.state === 'perch') {
+    // perched on a cactus: wings folded against the body
+    for (var side2 = -1; side2 <= 1; side2 += 2) {
+      ctx.fillStyle = '#2e2318';
+      ctx.beginPath(); ctx.ellipse(-1 * sc, side2 * 3.4 * sc, 6.5 * sc, 1.8 * sc, side2 * 0.08, 0, 7); ctx.fill();
+      ctx.fillStyle = '#6b543c';
+      ctx.beginPath(); ctx.ellipse(-1 * sc, side2 * 3 * sc, 5.5 * sc, 1.1 * sc, side2 * 0.08, 0, 7); ctx.fill();
+    }
+  } else
+  for (var side = -1; side <= 1; side += 2) {
+    // broad wing, swept slightly back, root buried inside the body so it
+    // stays attached while flapping
+    var sweep = side * 0.24 + wing * side * 0.06;
+    var cx = -1.5 * sc, cy = side * (8 * sc + lift * 0.3);
+    // covert base (mid-brown)
+    ctx.fillStyle = '#6b543c';
+    ctx.beginPath(); ctx.ellipse(cx, cy, 3.6 * sc, 9.5 * sc, sweep, 0, 7); ctx.fill();
+    // pale leading edge
+    ctx.fillStyle = '#7d6547';
+    ctx.beginPath(); ctx.ellipse(cx + 1.3 * sc, cy - side * 0.5 * sc, 2.1 * sc, 8.2 * sc, sweep, 0, 7); ctx.fill();
+    // dark flight-feather panel toward the trailing edge
+    ctx.fillStyle = '#2e2318';
+    ctx.beginPath(); ctx.ellipse(cx - 1.7 * sc, cy + side * 1 * sc, 2.3 * sc, 8.6 * sc, sweep, 0, 7); ctx.fill();
+    // pale median-covert bar between the two
+    ctx.fillStyle = '#9a8264';
+    ctx.beginPath(); ctx.ellipse(cx - 0.2 * sc, cy, 0.7 * sc, 7 * sc, sweep, 0, 7); ctx.fill();
+    // slotted primaries: separations fanning across the wingtip
+    ctx.strokeStyle = 'rgba(20,14,10,0.65)';
+    ctx.lineWidth = 0.7 * sc;
+    for (var p = 0; p < 4; p++) {
+      var pr = 5.5 * sc + p * 1.6 * sc; // distance out along the wing
+      var px = cx - p * 0.5 * sc;
+      var py = cy + side * pr;
+      ctx.beginPath();
+      ctx.moveTo(px - 1.8 * sc, py - side * 1.2 * sc);
+      ctx.lineTo(px - 1.8 * sc, py + side * 1.2 * sc);
+      ctx.stroke();
+    }
+    // covert freckles
+    ctx.fillStyle = 'rgba(60,44,30,0.5)';
+    ctx.beginPath(); ctx.ellipse(cx + 0.8 * sc, cy + side * 2 * sc, 0.8 * sc, 1.5 * sc, sweep, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + 0.6 * sc, cy + side * 5 * sc, 0.7 * sc, 1.2 * sc, sweep, 0, 7); ctx.fill();
+  }
+  // tail fan with a pale terminal band + barring
+  ctx.fillStyle = '#2e2318';
+  ctx.beginPath();
+  ctx.moveTo(-7 * sc, 0);
+  ctx.lineTo(-14 * sc, -4.5 * sc);
+  ctx.lineTo(-16 * sc, 0);
+  ctx.lineTo(-14 * sc, 4.5 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#9a8264';
+  ctx.beginPath();
+  ctx.moveTo(-13 * sc, -3.4 * sc); ctx.lineTo(-14.6 * sc, -4.1 * sc);
+  ctx.lineTo(-14.6 * sc, 4.1 * sc); ctx.lineTo(-13 * sc, 3.4 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(20,14,10,0.5)';
+  ctx.lineWidth = 0.6 * sc;
+  ctx.beginPath(); ctx.moveTo(-9.5 * sc, -2.6 * sc); ctx.lineTo(-9.5 * sc, 2.6 * sc); ctx.stroke();
+  // body: dark with a lighter streaked mantle
+  ctx.fillStyle = '#4f3d2e';
+  ctx.beginPath(); ctx.ellipse(0, 0, 8 * sc, 3.6 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#5f4b38';
+  ctx.beginPath(); ctx.ellipse(-1 * sc, 0, 6 * sc, 2.6 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(154,130,100,0.8)'; // buff scapular streaks
+  for (var s2 = 0; s2 < 3; s2++) {
+    ctx.beginPath(); ctx.ellipse((-4 + s2 * 3) * sc, -1.4 * sc, 1.4 * sc, 0.5 * sc, 0.1, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse((-4 + s2 * 3) * sc, 1.4 * sc, 1.4 * sc, 0.5 * sc, -0.1, 0, 7); ctx.fill();
+  }
+  // fluffy neck ruff: scalloped pale collar
+  ctx.fillStyle = '#e4d6b8';
+  for (var r2 = 0; r2 < 9; r2++) {
+    var ra = (r2 / 9) * Math.PI * 2;
+    ctx.beginPath(); ctx.arc(7 * sc + Math.cos(ra) * 3.5 * sc, Math.sin(ra) * 3.5 * sc, 1.6 * sc, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = '#d9cba8';
+  ctx.beginPath(); ctx.ellipse(7 * sc, 0, 3.8 * sc, 3.8 * sc, 0, 0, 7); ctx.fill();
+  // big bald head: reddish skin, darker crown
+  ctx.fillStyle = '#c96f62';
+  ctx.beginPath(); ctx.arc(11 * sc, 0, 3.8 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#a95248';
+  ctx.beginPath(); ctx.ellipse(9.8 * sc, 0, 2.2 * sc, 3 * sc, 0, 0, 7); ctx.fill();
+  // eyes with amber rings + brow shadows
+  for (var e2 = -1; e2 <= 1; e2 += 2) {
+    ctx.fillStyle = 'rgba(60,20,15,0.55)';
+    ctx.beginPath(); ctx.ellipse(11.8 * sc, e2 * 2 * sc, 1.7 * sc, 1.1 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#c9a13b';
+    ctx.beginPath(); ctx.arc(11.8 * sc, e2 * 1.9 * sc, 1.2 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#14100c';
+    ctx.beginPath(); ctx.arc(11.8 * sc, e2 * 1.9 * sc, 0.8 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(12 * sc, e2 * 1.9 * sc - 0.35 * sc, 0.32 * sc, 0, 7); ctx.fill();
+  }
+  // hooked beak: ivory with a dark tip
+  ctx.fillStyle = '#e8ddc0';
+  ctx.beginPath();
+  ctx.moveTo(13.8 * sc, -1.7 * sc); ctx.lineTo(16.8 * sc, 0); ctx.lineTo(13.8 * sc, 1.7 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#2e2620';
+  ctx.beginPath();
+  ctx.moveTo(15.4 * sc, -0.85 * sc); ctx.lineTo(16.8 * sc, 0); ctx.lineTo(15.4 * sc, 0.85 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawSnowyOwl(ow) {
+  // Snowy owl from above: white with dark barring, broad rounded wings,
+  // big round head with yellow eyes. Perched birds fold their wings on the
+  // pine top. A soft shadow sits below so flyers read as flying.
+  var sc = ow.sc;
+  var wing = Math.sin(ow.flap); // -1 tucked .. +1 raised
+  ctx.save();
+  ctx.translate(ow.x, ow.y);
+  var roosting = ow.state === 'perch' || ow.state === 'eat';
+  if (roosting) {
+    // sitting tight on the pine top: small shadow directly underneath
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(0, 1 * sc, 8 * sc, 4 * sc, 0, 0, 7); ctx.fill();
+  } else {
+    // ground shadow, offset a little behind the bird
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(-6 * sc, 4 * sc, 14 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+  }
+  ctx.rotate(ow.heading);
+  var lift = wing * 3.5 * sc;
+  if (roosting) {
+    // perched on a pine top: wings folded against the body
+    for (var side2 = -1; side2 <= 1; side2 += 2) {
+      ctx.fillStyle = '#dfe3da';
+      ctx.beginPath(); ctx.ellipse(-1 * sc, side2 * 3.4 * sc, 6.5 * sc, 1.8 * sc, side2 * 0.08, 0, 7); ctx.fill();
+      ctx.fillStyle = '#eef0ea';
+      ctx.beginPath(); ctx.ellipse(-1 * sc, side2 * 3 * sc, 5.5 * sc, 1.1 * sc, side2 * 0.08, 0, 7); ctx.fill();
+      // dark bars across the folded wing
+      ctx.strokeStyle = 'rgba(70,62,52,0.7)';
+      ctx.lineWidth = 0.9 * sc;
+      for (var fb = 0; fb < 3; fb++) {
+        var fbx = (-4 + fb * 3) * sc;
+        ctx.beginPath();
+        ctx.moveTo(fbx, side2 * 2.2 * sc);
+        ctx.lineTo(fbx, side2 * 4.4 * sc);
+        ctx.stroke();
+      }
+    }
+  } else {
+    for (var side = -1; side <= 1; side += 2) {
+      // broad rounded wing, swept slightly back, root buried inside the body
+      var sweep = side * 0.24 + wing * side * 0.06;
+      var cx = -1.5 * sc, cy = side * (8 * sc + lift * 0.3);
+      ctx.fillStyle = '#e9ece3';
+      ctx.beginPath(); ctx.ellipse(cx, cy, 3.6 * sc, 9.5 * sc, sweep, 0, 7); ctx.fill();
+      // pale grey trailing edge
+      ctx.fillStyle = '#c9cdc0';
+      ctx.beginPath(); ctx.ellipse(cx - 1.7 * sc, cy + side * 1 * sc, 2.2 * sc, 8.4 * sc, sweep, 0, 7); ctx.fill();
+      // dark barring across the wing
+      ctx.strokeStyle = 'rgba(70,62,52,0.7)';
+      ctx.lineWidth = 1 * sc;
+      for (var wb = 0; wb < 4; wb++) {
+        var wby = cy + side * (2.5 + wb * 2.2) * sc;
+        ctx.beginPath();
+        ctx.moveTo(cx - 2.6 * sc, wby);
+        ctx.lineTo(cx + 2.2 * sc, wby + side * 0.5 * sc);
+        ctx.stroke();
+      }
+      // dark flecks near the wingtip
+      ctx.fillStyle = 'rgba(70,62,52,0.55)';
+      ctx.beginPath(); ctx.ellipse(cx, cy + side * 7.5 * sc, 1 * sc, 1.4 * sc, sweep, 0, 7); ctx.fill();
+    }
+  }
+  // short rounded tail with bars
+  ctx.fillStyle = '#e9ece3';
+  ctx.beginPath();
+  ctx.moveTo(-7 * sc, 0);
+  ctx.lineTo(-13 * sc, -3.5 * sc);
+  ctx.lineTo(-14.5 * sc, 0);
+  ctx.lineTo(-13 * sc, 3.5 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(70,62,52,0.7)';
+  ctx.lineWidth = 0.8 * sc;
+  ctx.beginPath(); ctx.moveTo(-10 * sc, -2.4 * sc); ctx.lineTo(-10 * sc, 2.4 * sc); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-12 * sc, -2.8 * sc); ctx.lineTo(-12 * sc, 2.8 * sc); ctx.stroke();
+  // white body with dark flecks
+  ctx.fillStyle = '#f0f2ec';
+  ctx.beginPath(); ctx.ellipse(0, 0, 8 * sc, 3.8 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(70,62,52,0.55)';
+  ctx.beginPath(); ctx.ellipse(-4 * sc, -1.5 * sc, 0.9 * sc, 0.5 * sc, 0.1, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-1 * sc, 1.8 * sc, 0.9 * sc, 0.5 * sc, -0.1, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-5 * sc, 1.2 * sc, 0.8 * sc, 0.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(2 * sc, -2 * sc, 0.8 * sc, 0.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(3 * sc, 1.5 * sc, 0.8 * sc, 0.5 * sc, 0, 0, 7); ctx.fill();
+  // big round head with a pale facial disc
+  ctx.fillStyle = '#f4f6f1';
+  ctx.beginPath(); ctx.arc(9.5 * sc, 0, 3.6 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#e2e6db';
+  ctx.beginPath(); ctx.arc(10 * sc, -1.7 * sc, 1.9 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(10 * sc, 1.7 * sc, 1.9 * sc, 0, 7); ctx.fill();
+  // yellow eyes with dark pupils
+  for (var e2 = -1; e2 <= 1; e2 += 2) {
+    ctx.fillStyle = '#e8b820';
+    ctx.beginPath(); ctx.arc(10.2 * sc, e2 * 1.7 * sc, 1.1 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#141210';
+    ctx.beginPath(); ctx.arc(10.2 * sc, e2 * 1.7 * sc, 0.6 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(10.4 * sc, e2 * 1.7 * sc - 0.3 * sc, 0.28 * sc, 0, 7); ctx.fill();
+  }
+  // small dark hooked beak
+  ctx.fillStyle = '#3a3630';
+  ctx.beginPath();
+  ctx.moveTo(12.6 * sc, -0.9 * sc); ctx.lineTo(14.2 * sc, 0); ctx.lineTo(12.6 * sc, 0.9 * sc);
+  ctx.closePath(); ctx.fill();
   ctx.restore();
 }
 function drawPlayer(sx, sy, t) {
@@ -4743,6 +5703,40 @@ function render(t, rdt) {
             ctx.fillStyle = 'rgba(190,210,235,0.5)';
             ctx.fillRect(sx + hash2(x, y, 635) * 26 + 2, sy + hash2(x, y, 636) * 26 + 2, 3, 3);
           }
+          // frosty grass tufts poking through the snow
+          if (hash2(x, y, 637) < 0.5 && !pines[i]) {
+            var sgx = sx + 6 + hash2(x, y, 638) * 20;
+            var sgy = sy + 8 + hash2(x, y, 639) * 18;
+            ctx.strokeStyle = 'rgba(139,168,148,0.9)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(sgx, sgy); ctx.lineTo(sgx - 2, sgy - 7);
+            ctx.moveTo(sgx + 4, sgy + 1); ctx.lineTo(sgx + 5, sgy - 6);
+            ctx.moveTo(sgx + 8, sgy); ctx.lineTo(sgx + 10, sgy - 5);
+            ctx.stroke();
+            // snow dusted around the tuft base
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.beginPath(); ctx.ellipse(sgx + 4, sgy + 1, 5.5, 2.5, 0, 0, 7); ctx.fill();
+          }
+          // tall snowy grass: sparser clumps of longer frost-tipped blades
+          if (hash2(x, y, 640) < 0.18 && !pines[i]) {
+            var lgx = sx + 8 + hash2(x, y, 641) * 16;
+            var lgy = sy + 10 + hash2(x, y, 642) * 14;
+            ctx.strokeStyle = 'rgba(120,155,135,0.95)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(lgx, lgy); ctx.lineTo(lgx - 3, lgy - 14);
+            ctx.moveTo(lgx + 4, lgy); ctx.lineTo(lgx + 3, lgy - 16);
+            ctx.moveTo(lgx + 8, lgy); ctx.lineTo(lgx + 10, lgy - 13);
+            ctx.moveTo(lgx + 2, lgy); ctx.lineTo(lgx - 1, lgy - 10);
+            ctx.stroke();
+            // frost dots on the blade tips + snow piled at the base
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.beginPath(); ctx.arc(lgx - 3, lgy - 14, 1.6, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.arc(lgx + 3, lgy - 16, 1.6, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.arc(lgx + 10, lgy - 13, 1.6, 0, 7); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(lgx + 4, lgy + 1, 7, 3, 0, 0, 7); ctx.fill();
+          }
         } else {
         if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i] && !acacias[i] && !deadB[i]) {
           ctx.strokeStyle = sav[i] ? 'rgba(150,125,70,0.8)' : 'rgba(20,90,40,0.7)';
@@ -4753,6 +5747,24 @@ function render(t, rdt) {
           ctx.moveTo(gx, gy); ctx.lineTo(gx - 2, gy - 6);
           ctx.moveTo(gx + 5, gy + 1); ctx.lineTo(gx + 7, gy - 5);
           ctx.stroke();
+        }
+        if (sav[i] && hash2(x, y, 643) < 0.22 && !acacias[i] && !deadB[i]) {
+          // dry tall grass: golden clumps with seed heads
+          var tgx = sx + 8 + hash2(x, y, 644) * 16;
+          var tgy = sy + 10 + hash2(x, y, 645) * 14;
+          ctx.strokeStyle = 'rgba(178,150,84,0.95)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(tgx, tgy); ctx.lineTo(tgx - 3, tgy - 15);
+          ctx.moveTo(tgx + 4, tgy); ctx.lineTo(tgx + 3, tgy - 17);
+          ctx.moveTo(tgx + 8, tgy); ctx.lineTo(tgx + 11, tgy - 14);
+          ctx.moveTo(tgx + 2, tgy); ctx.lineTo(tgx, tgy - 10);
+          ctx.stroke();
+          // seed heads on the stalk tips
+          ctx.fillStyle = 'rgba(214,186,120,0.95)';
+          ctx.beginPath(); ctx.ellipse(tgx - 3, tgy - 15, 1.8, 2.6, -0.2, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(tgx + 3, tgy - 17, 1.8, 2.6, 0.1, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(tgx + 11, tgy - 14, 1.8, 2.6, 0.25, 0, 7); ctx.fill();
         }
         if (deadB[i]) drawDeadBush(sx, sy, x, y);
         if (litter[i] === 3) {
@@ -5018,6 +6030,7 @@ function render(t, rdt) {
   for (var bki2 = 0; bki2 < bunnies.length; bki2++) {
     var bn2 = bunnies[bki2];
     if (bn2.state === 'inside') continue;
+    if (bn2.state === 'caught') continue; // snatched by an owl: drawn above the trees with its owl
     if (bn2.x < cam.x - 60 || bn2.x > cam.x + viewW + 60 || bn2.y < cam.y - 60 || bn2.y > cam.y + viewH + 60) continue;
     drawables.push([bn2.y, 2000 + bki2, 0]);
   }
@@ -5042,6 +6055,13 @@ function render(t, rdt) {
     if (sn2.x < cam.x - 80 || sn2.x > cam.x + viewW + 80 || sn2.y < cam.y - 80 || sn2.y > cam.y + viewH + 80) continue;
     drawables.push([sn2.y, 6000 + ski2, 0]);
   }
+  for (var ari2 = 0; ari2 < armadillos.length; ari2++) {
+    var ar2 = armadillos[ari2];
+    if (ar2.x < cam.x - 80 || ar2.x > cam.x + viewW + 80 || ar2.y < cam.y - 80 || ar2.y > cam.y + viewH + 80) continue;
+    drawables.push([ar2.y, 7000 + ari2, 0]);
+  }
+  // (Vultures fly over everything, so they draw in their own pass at the very
+  // end — never buried in the y-sorted ground layer or under canopies.)
   drawables.sort(function (a, b2) { return a[0] - b2[0]; });
   for (var d = 0; d < drawables.length; d++) {
     var oy = drawables[d][0];
@@ -5050,7 +6070,8 @@ function render(t, rdt) {
     var oyy = drawables[d][2] * TILE + TILE / 2;
     var btx = drawables[d][1], bty = drawables[d][2];
     var bti2 = idx(btx, bty);
-    if (btx >= 6000) drawSnake(snakes[btx - 6000], t);
+    if (btx >= 7000) drawArmadillo(armadillos[btx - 7000], t);
+    else if (btx >= 6000) drawSnake(snakes[btx - 6000], t);
     else if (btx >= 5000) drawJackrabbit(jacks[btx - 5000], t);
     else if (btx >= 4000) drawWarthog(warthogs[btx - 4000], t);
     else if (btx >= 3000) drawHedgehog(hedgehogs[btx - 3000], t);
@@ -5156,6 +6177,30 @@ function render(t, rdt) {
       if (!deadTree[dk3]) continue;
       drawDeadTree(dx2 * TILE + TILE / 2, dy2 * TILE + TILE / 2, dx2, dy2);
     }
+  }
+
+  // Vultures are above it all: flying birds soar over canopies and cacti,
+  // and perched birds sit on top of their cacti. Drawn last of all.
+  for (var vli2 = 0; vli2 < vultures.length; vli2++) {
+    var vu2 = vultures[vli2];
+    var vmg = vu2.state === 'perch' ? 60 : 100;
+    if (vu2.x < cam.x - vmg || vu2.x > cam.x + viewW + vmg || vu2.y < cam.y - vmg || vu2.y > cam.y + viewH + vmg) continue;
+    drawVulture(vu2);
+  }
+  // Snowy owls fly over everything too, above the pines they perch on.
+  // Snatched rabbits dangle above the trees with their owls (owl drawn
+  // over the catch it holds).
+  for (var bci = 0; bci < bunnies.length; bci++) {
+    var bc = bunnies[bci];
+    if (bc.state !== 'caught') continue;
+    if (bc.x < cam.x - 60 || bc.x > cam.x + viewW + 60 || bc.y < cam.y - 60 || bc.y > cam.y + viewH + 60) continue;
+    drawBunny(bc, t);
+  }
+  for (var owi3 = 0; owi3 < snowyOwls.length; owi3++) {
+    var ow2 = snowyOwls[owi3];
+    var omg = (ow2.state === 'perch' || ow2.state === 'eat') ? 60 : 100;
+    if (ow2.x < cam.x - omg || ow2.x > cam.x + viewW + omg || ow2.y < cam.y - omg || ow2.y > cam.y + viewH + omg) continue;
+    drawSnowyOwl(ow2);
   }
 
   // Screen-space UI (joystick, minimap)
