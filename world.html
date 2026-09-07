@@ -212,6 +212,11 @@ var JACK_MAX = 50; // jackrabbit maximum population
 var SNAKE_COUNT = 20; // rattlesnakes: always exactly this many, never die
 var VULTURE_COUNT = 8; // vultures: always exactly this many, circle the desert, never die
 var SNOWY_OWL_COUNT = 15; // snowy owls: always exactly this many, roam the snow, never die
+var SEAGULL_COUNT = 58; // seagulls: always exactly this many, roam the ocean, never die
+var SEATURTLE_COUNT = 25; // sea turtle shadows: always exactly this many, glide under the ocean, never die
+var DOLPHIN_COUNT = 20; // dolphin shadows: always exactly this many, roam the ocean, never die
+var turtleNests = []; // beach nests with eggs: {x,y,timer,mom}
+var beachSpots = []; // beach sand tiles turtles can nest on (refilled in generate)
 var jackBurrows = []; // jackrabbit burrows in the desert sand
 var jacks = []; // desert jackrabbits (big ears, never eat)
 var snakeHoles = []; // rattlesnake burrows in the sand
@@ -220,7 +225,10 @@ var vultures = []; // desert vultures circling overhead
 var cactusSpots = []; // cactus tiles vultures can perch on (refilled in generate)
 var snowyOwls = []; // snowy owls roaming overhead in the snow
 var pineSpots = []; // pine tiles owls can perch on (refilled in generate)
-var jackCheckT = 0, snakeCheckT = 0, vultCheckT = 0, owlCheckT = 0;
+var jackCheckT = 0, snakeCheckT = 0, vultCheckT = 0, owlCheckT = 0, gullCheckT = 0, turtleCheckT = 0, dolphinCheckT = 0;
+var seagulls = []; // seagulls roaming overhead over the ocean
+var seaTurtles = []; // sea turtle shadows gliding under the ocean water
+var dolphins = []; // dolphin shadows roaming under the ocean water
 var desSpots = []; // desert sand tiles snakes can spawn on (refilled in generate)
 var acacias = new Uint8Array(W * H); // umbrella acacia trees on the savanna
 var deadB = new Uint8Array(W * H); // dead bushes on the savanna
@@ -1748,6 +1756,11 @@ function generate(s) {
   cactusSpots = [];
   snowyOwls = [];
   pineSpots = [];
+  seagulls = [];
+  seaTurtles = [];
+  dolphins = [];
+  turtleNests = [];
+  beachSpots = [];
   desSpots = [];
   var bcands = [];
   for (y = 0; y < H; y++) {
@@ -2049,6 +2062,55 @@ function generate(s) {
     var owlsrc = snowHogSpots.length ? snowHogSpots : pineSpots;
     var owl2 = owlsrc[(Math.random() * owlsrc.length) | 0];
     spawnSnowyOwl((owl2 % W + 0.5) * TILE, (((owl2 / W) | 0) + 0.5) * TILE);
+  }
+  // Seagulls start scattered anywhere over the ocean (not just open water).
+  // They fly, so these are just starting points high above the waves.
+  var gullsWanted = SEAGULL_COUNT, gullTries = 0;
+  while (seagulls.length < SEAGULL_COUNT && gullTries < 8000) {
+    gullTries++;
+    var gox = (Math.random() * W) | 0, goy = (Math.random() * H) | 0;
+    if (biome[idx(gox, goy)] !== OCEAN) continue;
+    spawnSeagull((gox + 0.5) * TILE, (goy + 0.5) * TILE);
+  }
+  while (seagulls.length < SEAGULL_COUNT && seaFishSpots.length) {
+    var gul2 = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+    spawnSeagull((gul2 % W + 0.5) * TILE, (((gul2 / W) | 0) + 0.5) * TILE);
+  }
+  // Beach sand with the ocean touching it (4 sides): turtle nest sites.
+  // (Built here at the end so the reset block above can't wipe it.)
+  beachSpots = [];
+  for (var bsy = 0; bsy < H; bsy++) {
+    for (var bsx = 0; bsx < W; bsx++) {
+      var bsi = idx(bsx, bsy);
+      if (biome[bsi] !== SAND) continue;
+      if ((bsx + 1 < W && biome[bsi + 1] === OCEAN) ||
+          (bsx - 1 >= 0 && biome[bsi - 1] === OCEAN) ||
+          (bsy + 1 < H && biome[bsi + W] === OCEAN) ||
+          (bsy - 1 >= 0 && biome[bsi - W] === OCEAN)) beachSpots.push(bsi);
+    }
+  }
+  // Sea turtle shadows start scattered anywhere well out at sea.
+  var turtlesWanted = SEATURTLE_COUNT, turtleTries = 0;  while (seaTurtles.length < SEATURTLE_COUNT && turtleTries < 8000) {
+    turtleTries++;
+    var ttox = (Math.random() * W) | 0, ttoy = (Math.random() * H) | 0;
+    if (!openSeaAt((ttox + 0.5) * TILE, (ttoy + 0.5) * TILE)) continue;
+    spawnSeaTurtle((ttox + 0.5) * TILE, (ttoy + 0.5) * TILE);
+  }
+  while (seaTurtles.length < SEATURTLE_COUNT && seaFishSpots.length) {
+    var tto2 = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+    spawnSeaTurtle((tto2 % W + 0.5) * TILE, (((tto2 / W) | 0) + 0.5) * TILE);
+  }
+  // Dolphin shadows start scattered anywhere well out at sea.
+  var dolphinsWanted = DOLPHIN_COUNT, dolphinTries = 0;
+  while (dolphins.length < DOLPHIN_COUNT && dolphinTries < 8000) {
+    dolphinTries++;
+    var dtox = (Math.random() * W) | 0, dtoy = (Math.random() * H) | 0;
+    if (!openSeaAt((dtox + 0.5) * TILE, (dtoy + 0.5) * TILE)) continue;
+    spawnDolphin((dtox + 0.5) * TILE, (dtoy + 0.5) * TILE);
+  }
+  while (dolphins.length < DOLPHIN_COUNT && seaFishSpots.length) {
+    var dto2 = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+    spawnDolphin((dto2 % W + 0.5) * TILE, (((dto2 / W) | 0) + 0.5) * TILE);
   }
 
   buildMinimap();
@@ -2523,6 +2585,158 @@ function spawnSnowyOwl(x, y) {
     prey: null, preySc: 1, gulpT: 0,
     huntCd: 6 + Math.random() * 10
   });
+}
+// A nearby open-sea spot to wander to (keeps crossings over land short)
+function pickSeaSpot(gu) {
+  if (!seaFishSpots.length) return -1;
+  var best = -1, bd = 1e12;
+  for (var t = 0; t < 6; t++) {
+    var s = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+    var cx = (s % W + 0.5) * TILE, cy = (((s / W) | 0) + 0.5) * TILE;
+    var dx = cx - gu.x, dy = cy - gu.y;
+    var d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+// True if a point is well out at sea (ocean with ocean all around, so a
+// turtle body there never touches land)
+function openSeaAt(px, py) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  for (var oy = -1; oy <= 1; oy++) {
+    for (var ox = -1; ox <= 1; ox++) {
+      var nx = tx + ox, ny = ty + oy;
+      if (!inBounds(nx, ny) || biome[idx(nx, ny)] !== OCEAN) return false;
+    }
+  }
+  return true;
+}
+// Nearest open sea to head for when too close to shore (searches outward)
+function nearestOpenSea(gx, gy) {
+  var hx = Math.floor(gx / TILE), hy = Math.floor(gy / TILE);
+  for (var r = 1; r <= 20; r++) {
+    for (var oy = -r; oy <= r; oy++) {
+      for (var ox = -r; ox <= r; ox++) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+        var nx = hx + ox, ny = hy + oy;
+        if (!inBounds(nx, ny)) continue;
+        if (openSeaAt((nx + 0.5) * TILE, (ny + 0.5) * TILE)) return { x: (nx + 0.5) * TILE, y: (ny + 0.5) * TILE };
+      }
+    }
+  }
+  return null;
+}
+// Nearest ocean tile to fly back to (searches outward ring by ring)
+function nearestOceanTile(gx, gy) {
+  var hx = Math.floor(gx / TILE), hy = Math.floor(gy / TILE);
+  for (var r = 1; r <= 14; r++) {
+    for (var oy = -r; oy <= r; oy++) {
+      for (var ox = -r; ox <= r; ox++) {
+        if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+        var nx = hx + ox, ny = hy + oy;
+        if (!inBounds(nx, ny)) continue;
+        if (biome[idx(nx, ny)] === OCEAN) return { x: (nx + 0.5) * TILE, y: (ny + 0.5) * TILE };
+      }
+    }
+  }
+  return null;
+}
+// A seagull roaming the open ocean. Wanders to random spots over the waves,
+// never lands, never dies, never breeds — always exactly 58 of them.
+function spawnSeagull(x, y) {
+  var gsc = 0.8 + Math.random() * 0.3;
+  var gx = x + (Math.random() - 0.5) * 40, gy = y + (Math.random() - 0.5) * 40;
+  seagulls.push({
+    x: gx, y: gy,
+    heading: Math.random() * Math.PI * 2,
+    tx: gx, ty: gy,
+    timer: 1 + Math.random() * 2,
+    sc: gsc,
+    flap: Math.random() * 10,
+    glideT: Math.random() * 3,
+    speed: 60 + Math.random() * 30
+  });
+}
+// A sea turtle shadow gliding under the ocean water. Slow, never dies
+// except when a mother dies as her eggs hatch — always 25 turtles overall.
+function spawnSeaTurtle(x, y) {
+  var gsc = 1.6 + Math.random() * 0.5;
+  seaTurtles.push({
+    x: x + (Math.random() - 0.5) * 20, y: y + (Math.random() - 0.5) * 20,
+    heading: Math.random() * Math.PI * 2,
+    tx: x, ty: y,
+    state: 'swim',
+    timer: 2 + Math.random() * 3,
+    sc: gsc, gsc: gsc,
+    baby: false, age: 0,
+    nestCd: 60 + Math.random() * 120, // first nestings start after a minute or so
+    paddle: Math.random() * 10,
+    speed: 20 + Math.random() * 15
+  });
+}
+// A dolphin shadow roaming under the ocean water. Faster than a turtle,
+// never dies, never breeds — always exactly 20 of them.
+function spawnDolphin(x, y) {
+  var gsc = 1.2 + Math.random() * 0.4;
+  dolphins.push({
+    x: x + (Math.random() - 0.5) * 20, y: y + (Math.random() - 0.5) * 20,
+    heading: Math.random() * Math.PI * 2,
+    tx: x, ty: y,
+    state: 'swim',
+    timer: 2 + Math.random() * 3,
+    sc: gsc,
+    wig: Math.random() * 10,
+    speed: 40 + Math.random() * 20,
+    jumpT: 0, jumpX: 0, jumpY: 0, jumpH: 0,
+    buddy: null, buddyRole: null, buddySide: 1, buddyT: 0,
+    buddyCd: 10 + Math.random() * 30
+  });
+}
+// Break up a dolphin pair (either side can call it)
+function splitBuddies(dl) {
+  if (dl.buddy) {
+    var o = dl.buddy;
+    dl.buddy = null; dl.buddyRole = null;
+    if (o.buddy === dl) { o.buddy = null; o.buddyRole = null; }
+  }
+}
+// True if a beaching turtle can't crawl there (stays on sand and sea)
+function beachBlocked(px, py) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  if (!inBounds(tx, ty)) return true;
+  var b = biome[idx(tx, ty)];
+  if (b !== SAND && b !== OCEAN) return true;
+  return hitsSolid(px, py);
+}
+// A beach spot near the turtle to nest on (tile index, or -1): close water,
+// no other nest or inbound turtle too close
+function pickBeach(bt) {
+  if (!beachSpots.length) return -1;
+  var best = -1, bd = 1e12;
+  for (var t = 0; t < 8; t++) {
+    var s = beachSpots[(Math.random() * beachSpots.length) | 0];
+    var cx = (s % W + 0.5) * TILE, cy = (((s / W) | 0) + 0.5) * TILE;
+    var dx = cx - bt.x, dy = cy - bt.y;
+    var d = dx * dx + dy * dy;
+    if (d > 900 * 900) continue; // only nest nearby, don't cross the map
+    var crowded = false;
+    for (var n = 0; n < turtleNests.length; n++) {
+      var ex = turtleNests[n].x - cx, ey = turtleNests[n].y - cy;
+      if (ex * ex + ey * ey < 48 * 48) { crowded = true; break; }
+    }
+    if (!crowded) {
+      for (var k = 0; k < seaTurtles.length; k++) {
+        var o = seaTurtles[k];
+        if (o === bt) continue;
+        if (o.state !== 'toBeach' && o.state !== 'laying') continue;
+        var ox = o.tx - cx, oy = o.ty - cy;
+        if (ox * ox + oy * oy < 48 * 48) { crowded = true; break; }
+      }
+    }
+    if (crowded) continue;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
 }
 // True if another owl is already landing on / sitting on / eating on this
 // pine top — only one owl per pine at a time.
@@ -4276,6 +4490,425 @@ function update(dt) {
       spawnSnowyOwl((owl3 % W + 0.5) * TILE, (((owl3 / W) | 0) + 0.5) * TILE);
     }
   }
+  // Seagulls: wander to random spots over the open ocean, flapping then
+  // gliding. They fly, so nothing stops them — but they never leave the
+  // ocean. Always exactly 58, they never die.
+  for (var gui = 0; gui < seagulls.length; gui++) {
+    var gu = seagulls[gui];
+    gu.flap += dt * (gu.glideT > 0 ? 3 : 9);
+    if (gu.glideT > 0) gu.glideT -= dt;
+    else if (Math.random() < dt * 0.25) gu.glideT = 1.5 + Math.random() * 2.5;
+    gu.timer -= dt;
+    var gdx = gu.tx - gu.x, gdy = gu.ty - gu.y;
+    if (gu.timer <= 0 || gdx * gdx + gdy * gdy < 40 * 40) {
+      // pick a new random spot over the nearby open ocean
+      gu.timer = 4 + Math.random() * 5;
+      var gspot = pickSeaSpot(gu);
+      if (gspot !== -1) {
+        gu.tx = (gspot % W + 0.5) * TILE; gu.ty = (((gspot / W) | 0) + 0.5) * TILE;
+      }
+      gu.speed = 60 + Math.random() * 30;
+      gdx = gu.tx - gu.x; gdy = gu.ty - gu.y;
+    }
+    // bank toward the target with a limited turn rate, plus a smooth gentle
+    // sway so the path wanders instead of flying perfect circles
+    var gwant = Math.atan2(gdy, gdx);
+    var gdw = gwant - gu.heading;
+    while (gdw > Math.PI) gdw -= Math.PI * 2;
+    while (gdw < -Math.PI) gdw += Math.PI * 2;
+    // open water running out ahead? turn the opposite way back over the sea
+    var glahead = TILE * 2.5;
+    var gltx = Math.floor((gu.x + Math.cos(gu.heading) * glahead) / TILE);
+    var glty = Math.floor((gu.y + Math.sin(gu.heading) * glahead) / TILE);
+    var gedge = !inBounds(gltx, glty) || biome[idx(gltx, glty)] !== OCEAN;
+    if (gedge) gu.heading += 3.5 * dt;
+    else gu.heading += Math.max(-1, Math.min(1, gdw)) * 2.5 * dt;
+    gu.heading += Math.sin(gu.flap * 0.35 + 1.3) * 0.35 * dt;
+    var gnx = gu.x + Math.cos(gu.heading) * gu.speed * dt;
+    var gny = gu.y + Math.sin(gu.heading) * gu.speed * dt;
+    // the next spot left the ocean (islands happen): point straight at the
+    // nearest water and fly there instead of freezing in place
+    var gtx = Math.floor(gnx / TILE), gty = Math.floor(gny / TILE);
+    if (!inBounds(gtx, gty) || biome[idx(gtx, gty)] !== OCEAN) {
+      var gback = nearestOceanTile(gu.x, gu.y);
+      if (gback) {
+        gu.tx = gback.x; gu.ty = gback.y;
+        gu.heading = Math.atan2(gu.ty - gu.y, gu.tx - gu.x);
+      } else gu.heading += Math.PI * dt;
+      gnx = gu.x + Math.cos(gu.heading) * gu.speed * dt;
+      gny = gu.y + Math.sin(gu.heading) * gu.speed * dt;
+    }
+    // keep inside the world (clamp instead of freezing in place)
+    if (gnx < 8) gnx = 8; else if (gnx > WORLD_PX - 8) gnx = WORLD_PX - 8;
+    if (gny < 8) gny = 8; else if (gny > WORLD_PY - 8) gny = WORLD_PY - 8;
+    gu.x = gnx; gu.y = gny;
+  }
+  // Always exactly 58 seagulls (safety net — they never die or breed)
+  gullCheckT += dt;
+  if (gullCheckT > 1) {
+    gullCheckT = 0;
+    while (seagulls.length < SEAGULL_COUNT && seaFishSpots.length) {
+      var gul3 = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+      spawnSeagull((gul3 % W + 0.5) * TILE, (((gul3 / W) | 0) + 0.5) * TILE);
+    }
+  }
+  // Sea turtle shadows: glide slowly under the open ocean. Every once in a
+  // while one breaks the rule, hauls out on a beach as a real turtle, lays
+  // eggs in a nest, and swims home. Eggs hatch after 30 seconds: the mother
+  // dies and a small shadow baby crawls to the sea and grows up in 30 more.
+  // Always exactly 25 turtles overall.
+  // Beach nests first: ticking eggs, then hatch (mom dies, baby is born)
+  for (var tni = turtleNests.length - 1; tni >= 0; tni--) {
+    var tn = turtleNests[tni];
+    tn.timer -= dt;
+    if (tn.timer <= 0) {
+      turtleNests.splice(tni, 1);
+      // the mother dies as her eggs hatch
+      var tmi = seaTurtles.indexOf(tn.mom);
+      if (tmi !== -1) seaTurtles.splice(tmi, 1);
+      // the baby: a small shadow that crawls to the water, grown in 30s
+      var tbgsc = 1.6 + Math.random() * 0.5;
+      var tbb = {
+        x: tn.x + (Math.random() - 0.5) * 8, y: tn.y + (Math.random() - 0.5) * 8,
+        heading: Math.random() * Math.PI * 2,
+        tx: tn.x, ty: tn.y,
+        state: 'hatch',
+        timer: 0,
+        sc: 0.5, gsc: tbgsc,
+        baby: true, age: 0,
+        nestCd: 300 + Math.random() * 300,
+        paddle: Math.random() * 10,
+        speed: 18 + Math.random() * 8
+      };
+      var tbh = nearestOceanTile(tbb.x, tbb.y);
+      if (tbh) { tbb.tx = tbh.x; tbb.ty = tbh.y; }
+      seaTurtles.push(tbb);
+    }
+  }
+  for (var tui = 0; tui < seaTurtles.length; tui++) {
+    var bt = seaTurtles[tui];
+    if (bt.baby) { // growing up over 30 seconds
+      bt.age += dt;
+      bt.sc = 0.5 + (bt.gsc - 0.5) * Math.min(1, bt.age / 30);
+      if (bt.age >= 30) bt.baby = false;
+    }
+    if (!bt.baby) bt.nestCd -= dt;
+    if (bt.state === 'hatch') {
+      // newborn on the beach: frantic flippers, crawl straight to the water
+      bt.paddle += dt * 6;
+      bt.heading = Math.atan2(bt.ty - bt.y, bt.tx - bt.x);
+      var hstep = bt.speed * dt;
+      var hox = bt.x, hoy = bt.y;
+      var hnx = bt.x + Math.cos(bt.heading) * hstep;
+      if (!beachBlocked(hnx, bt.y)) bt.x = hnx;
+      var hny = bt.y + Math.sin(bt.heading) * hstep;
+      if (!beachBlocked(bt.x, hny)) bt.y = hny;
+      if (Math.hypot(bt.x - hox, bt.y - hoy) < hstep * 0.3) bt.heading = Math.random() * Math.PI * 2;
+      if (bt.x < 8) bt.x = 8; else if (bt.x > WORLD_PX - 8) bt.x = WORLD_PX - 8;
+      if (bt.y < 8) bt.y = 8; else if (bt.y > WORLD_PY - 8) bt.y = WORLD_PY - 8;
+      var htx = Math.floor(bt.x / TILE), hty = Math.floor(bt.y / TILE);
+      if (inBounds(htx, hty) && biome[idx(htx, hty)] === OCEAN) { bt.state = 'swim'; bt.timer = 0; }
+      continue;
+    }
+    if (bt.state === 'toBeach') {
+      // breaking the rule on purpose: swimming ashore to nest, ocean rules off
+      bt.paddle += dt * 4;
+      var ttdx = bt.tx - bt.x, ttdy = bt.ty - bt.y;
+      if (ttdx * ttdx + ttdy * ttdy < 12 * 12) {
+        bt.state = 'laying'; bt.timer = 4; // beached: dig in and lay
+      } else {
+        var tth = Math.atan2(ttdy, ttdx) - bt.heading;
+        while (tth > Math.PI) tth -= Math.PI * 2;
+        while (tth < -Math.PI) tth += Math.PI * 2;
+        bt.heading += Math.max(-1, Math.min(1, tth)) * 2.5 * dt;
+        var ttstep = 45 * dt;
+        var ttnx = bt.x + Math.cos(bt.heading) * ttstep;
+        if (!beachBlocked(ttnx, bt.y)) bt.x = ttnx;
+        var ttny = bt.y + Math.sin(bt.heading) * ttstep;
+        if (!beachBlocked(bt.x, ttny)) bt.y = ttny;
+        if (bt.x < 8) bt.x = 8; else if (bt.x > WORLD_PX - 8) bt.x = WORLD_PX - 8;
+        if (bt.y < 8) bt.y = 8; else if (bt.y > WORLD_PY - 8) bt.y = WORLD_PY - 8;
+      }
+      continue;
+    }
+    if (bt.state === 'laying') {
+      // laying eggs in the sand mound
+      bt.paddle += dt * 2;
+      bt.timer -= dt;
+      if (bt.timer <= 0) {
+        turtleNests.push({ x: bt.x, y: bt.y, timer: 30, mom: bt });
+        bt.nestCd = 300 + Math.random() * 300;
+        var bhome = nearestOpenSea(bt.x, bt.y);
+        if (bhome) { bt.tx = bhome.x; bt.ty = bhome.y; }
+        bt.timer = 30;
+        bt.state = 'returning';
+      }
+      continue;
+    }
+    if (bt.state === 'returning') {
+      // crawled back toward the waves after laying
+      bt.paddle += dt * 3;
+      bt.timer -= dt;
+      var rdx = bt.tx - bt.x, rdy = bt.ty - bt.y;
+      var rh = Math.atan2(rdy, rdx) - bt.heading;
+      while (rh > Math.PI) rh -= Math.PI * 2;
+      while (rh < -Math.PI) rh += Math.PI * 2;
+      bt.heading += Math.max(-1, Math.min(1, rh)) * 2.5 * dt;
+      var rstep = 18 * dt;
+      var rnx = bt.x + Math.cos(bt.heading) * rstep;
+      if (!beachBlocked(rnx, bt.y)) bt.x = rnx;
+      var rny = bt.y + Math.sin(bt.heading) * rstep;
+      if (!beachBlocked(bt.x, rny)) bt.y = rny;
+      if (bt.x < 8) bt.x = 8; else if (bt.x > WORLD_PX - 8) bt.x = WORLD_PX - 8;
+      if (bt.y < 8) bt.y = 8; else if (bt.y > WORLD_PY - 8) bt.y = WORLD_PY - 8;
+      if (openSeaAt(bt.x, bt.y) || bt.timer <= 0) { bt.state = 'swim'; bt.timer = 0; }
+      continue;
+    }
+    bt.paddle += dt * 4;
+    bt.timer -= dt;
+    var bdx = bt.tx - bt.x, bdy = bt.ty - bt.y;
+    if (bt.timer <= 0 || bdx * bdx + bdy * bdy < 40 * 40) {
+      // pick a new random spot in the nearby open ocean — or break the rule
+      // and head for a beach to nest (only a few nesters at a time)
+      bt.timer = 6 + Math.random() * 6;
+      var bnested = false;
+      if (!bt.baby && bt.nestCd <= 0) {
+        var nesters = 0;
+        for (var nci = 0; nci < seaTurtles.length; nci++) {
+          var ncs = seaTurtles[nci].state;
+          if (ncs === 'toBeach' || ncs === 'laying' || ncs === 'returning') nesters++;
+        }
+        if (nesters < 3) {
+          var bns = pickBeach(bt);
+          if (bns !== -1) {
+            bt.state = 'toBeach';
+            bt.tx = (bns % W + 0.5) * TILE; bt.ty = (((bns / W) | 0) + 0.5) * TILE;
+            bnested = true;
+          } else bt.nestCd = 30; // no free beach: try again soon
+        }
+      }
+      if (!bnested) {
+        var bspot = pickSeaSpot(bt);
+        if (bspot !== -1) {
+          bt.tx = (bspot % W + 0.5) * TILE; bt.ty = (((bspot / W) | 0) + 0.5) * TILE;
+        }
+      }
+      bt.speed = 20 + Math.random() * 15;
+      bdx = bt.tx - bt.x; bdy = bt.ty - bt.y;
+    }
+    // slow bank toward the target with a gentle sway
+    var bwant = Math.atan2(bdy, bdx);
+    var bdw = bwant - bt.heading;
+    while (bdw > Math.PI) bdw -= Math.PI * 2;
+    while (bdw < -Math.PI) bdw += Math.PI * 2;
+    // shore ahead (within a tile of it)? turn away from it, toward whichever
+    // side still has open sea, before ever touching land
+    var blahead = TILE * 2.5;
+    var bfwd = bt.heading;
+    var blAng = bfwd - 0.6, brAng = bfwd + 0.6;
+    var bsAhead = openSeaAt(bt.x + Math.cos(bfwd) * blahead, bt.y + Math.sin(bfwd) * blahead);
+    var bsLeft = openSeaAt(bt.x + Math.cos(blAng) * blahead, bt.y + Math.sin(blAng) * blahead);
+    var bsRight = openSeaAt(bt.x + Math.cos(brAng) * blahead, bt.y + Math.sin(brAng) * blahead);
+    var bedge = !bsAhead;
+    if (bedge) {
+      if (bsLeft && !bsRight) bt.heading -= 3 * dt;
+      else if (bsRight && !bsLeft) bt.heading += 3 * dt;
+      else bt.heading += 3 * dt; // dead ahead blocked both ways: keep banking around
+    }
+    else bt.heading += Math.max(-1, Math.min(1, bdw)) * 1.5 * dt;
+    bt.heading += Math.sin(bt.paddle * 0.3) * 0.2 * dt;
+    var bnx = bt.x + Math.cos(bt.heading) * bt.speed * dt;
+    var bny = bt.y + Math.sin(bt.heading) * bt.speed * dt;
+    // drifting within a tile of shore: escape to nearby open sea and stop
+    // chasing the wander target until safely out (never freezes in place).
+    // Heading snaps straight at open water — no graceful arc while beached.
+    var btx = Math.floor(bnx / TILE), bty = Math.floor(bny / TILE);
+    if (!openSeaAt(bnx, bny)) {
+      var besc = nearestOpenSea(bt.x, bt.y);
+      if (besc) {
+        bt.tx = besc.x; bt.ty = besc.y;
+        bt.timer = Math.max(bt.timer, 4);
+      }
+      bt.heading = Math.atan2(bt.ty - bt.y, bt.tx - bt.x);
+      bnx = bt.x + Math.cos(bt.heading) * bt.speed * dt;
+      bny = bt.y + Math.sin(bt.heading) * bt.speed * dt;
+    }
+    // keep inside the world (clamp instead of freezing in place)
+    if (bnx < 8) bnx = 8; else if (bnx > WORLD_PX - 8) bnx = WORLD_PX - 8;
+    if (bny < 8) bny = 8; else if (bny > WORLD_PY - 8) bny = WORLD_PY - 8;
+    bt.x = bnx; bt.y = bny;
+  }
+  // Always exactly 25 sea turtles (safety net — mothers die hatching, so it tops up any gap)
+  turtleCheckT += dt;
+  if (turtleCheckT > 1) {
+    turtleCheckT = 0;
+    while (seaTurtles.length < SEATURTLE_COUNT && seaFishSpots.length) {
+      var tto3 = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+      spawnSeaTurtle((tto3 % W + 0.5) * TILE, (((tto3 / W) | 0) + 0.5) * TILE);
+    }
+  }
+  // Dolphin shadows: roam the open ocean, never leaving it. Sometimes two
+  // stick together and swim side by side for a while, and every once in a
+  // while one breaches: 1.5 seconds of realistic flight over 2.5 tiles,
+  // with splashes at both ends. Always exactly 20, they never die.
+  for (var dli = 0; dli < dolphins.length; dli++) {
+    var dl = dolphins[dli];
+    dl.wig += dt * (dl.state === 'jump' ? 10 : 6);
+    if (dl.state === 'jump') {
+      // mid-breach: ballistic flight along the takeoff line, rising then
+      // falling back over exactly 1.5 seconds and 2.5 tiles
+      dl.jumpT -= dt;
+      var jprog = 1 - dl.jumpT / 1.5;
+      if (jprog > 1) jprog = 1;
+      dl.x = dl.jumpX + Math.cos(dl.jumpH) * (TILE * 2.5) * jprog;
+      dl.y = dl.jumpY + Math.sin(dl.jumpH) * (TILE * 2.5) * jprog;
+      dl.heading = dl.jumpH;
+      if (dl.x < 8) dl.x = 8; else if (dl.x > WORLD_PX - 8) dl.x = WORLD_PX - 8;
+      if (dl.y < 8) dl.y = 8; else if (dl.y > WORLD_PY - 8) dl.y = WORLD_PY - 8;
+      if (dl.jumpT <= 0) {
+        // splashdown: back to a shadow and swimming
+        dl.state = 'swim'; dl.timer = 0;
+        if (splashes.length < 90) splashes.push({ x: dl.x, y: dl.y, age: 0, life: 0.9, maxR: 14 + Math.random() * 6 });
+      }
+      continue;
+    }
+    if (dl.buddyCd > 0) dl.buddyCd -= dt;
+    // validate an existing pair
+    if (dl.buddy && (dolphins.indexOf(dl.buddy) === -1 || dl.buddy.buddy !== dl)) dl.buddy = null;
+    if (dl.buddy && dl.buddyRole === 'follow') {
+      // swim beside the leader, matching its course
+      var dld = dl.buddy;
+      dl.buddyT -= dt;
+      if (dl.buddyT <= 0) splitBuddies(dl);
+      else {
+        var dgx = dld.x - Math.sin(dld.heading) * dl.buddySide * 16 * dl.sc;
+        var dgy = dld.y + Math.cos(dld.heading) * dl.buddySide * 16 * dl.sc;
+        var ddx = dgx - dl.x, ddy = dgy - dl.y;
+        var dfar2 = ddx * ddx + ddy * ddy;
+        dl.speed = dld.speed + (dfar2 > 40 * 40 ? 50 : 0); // sprint to catch up, cruise once alongside
+        var dfh;
+        if (ddx * ddx + ddy * ddy < 20 * 20) {
+          dfh = dld.heading - dl.heading; // alongside: match the leader
+        } else {
+          dfh = Math.atan2(ddy, ddx) - dl.heading; // catch up to the slot
+        }
+        while (dfh > Math.PI) dfh -= Math.PI * 2;
+        while (dfh < -Math.PI) dfh += Math.PI * 2;
+        dl.heading += Math.max(-1, Math.min(1, dfh)) * 3 * dt;
+        var dnx = dl.x + Math.cos(dl.heading) * dl.speed * dt;
+        var dny = dl.y + Math.sin(dl.heading) * dl.speed * dt;
+        if (!openSeaAt(dnx, dny)) { // partner led near shore: peel back to open sea
+          var dback = nearestOpenSea(dl.x, dl.y);
+          if (dback) dl.heading = Math.atan2(dback.y - dl.y, dback.x - dl.x);
+          dnx = dl.x + Math.cos(dl.heading) * dl.speed * dt;
+          dny = dl.y + Math.sin(dl.heading) * dl.speed * dt;
+        }
+        if (dnx < 8) dnx = 8; else if (dnx > WORLD_PX - 8) dnx = WORLD_PX - 8;
+        if (dny < 8) dny = 8; else if (dny > WORLD_PY - 8) dny = WORLD_PY - 8;
+        dl.x = dnx; dl.y = dny;
+      }
+      continue;
+    }
+    if (dl.buddy && dl.buddyRole === 'lead') {
+      dl.buddyT -= dt;
+      if (dl.buddyT <= 0) splitBuddies(dl);
+    }
+    dl.timer -= dt;
+    var ddx2 = dl.tx - dl.x, ddy2 = dl.ty - dl.y;
+    if (dl.timer <= 0 || ddx2 * ddx2 + ddy2 * ddy2 < 40 * 40) {
+      // pick a new random spot in the nearby open ocean — or buddy up
+      dl.timer = 5 + Math.random() * 5;
+      var dpaired = false;
+      if (!dl.buddy && dl.buddyCd <= 0) {
+        var dbf = null, dbbd = 150 * 150;
+        for (var dbi = 0; dbi < dolphins.length; dbi++) {
+          var dbo = dolphins[dbi];
+          if (dbo === dl || dbo.buddy) continue;
+          var dbdx = dbo.x - dl.x, dbdy = dbo.y - dl.y;
+          var dbd = dbdx * dbdx + dbdy * dbdy;
+          if (dbd < dbbd) { dbbd = dbd; dbf = dbo; }
+        }
+        if (dbf) {
+          dl.buddy = dbf; dbf.buddy = dl;
+          dl.buddyRole = 'lead'; dbf.buddyRole = 'follow';
+          dbf.buddySide = Math.random() < 0.5 ? -1 : 1;
+          var dbt = 15 + Math.random() * 10;
+          dl.buddyT = dbt; dbf.buddyT = dbt;
+          dl.buddyCd = 40 + Math.random() * 40; dbf.buddyCd = 40 + Math.random() * 40;
+          dpaired = true;
+        } else dl.buddyCd = 10 + Math.random() * 10; // nobody near: check again soon
+      }
+      if (!dpaired) {
+        // often: breach! (only with 2.5 tiles of open sea ahead)
+        var dbreached = false;
+        if (Math.random() < 0.28) {
+          var jdx = Math.cos(dl.heading), jdy = Math.sin(dl.heading);
+          if (openSeaAt(dl.x + jdx * TILE * 1.25, dl.y + jdy * TILE * 1.25) &&
+              openSeaAt(dl.x + jdx * TILE * 2.5, dl.y + jdy * TILE * 2.5)) {
+            dl.state = 'jump'; dl.jumpT = 1.5;
+            dl.jumpX = dl.x; dl.jumpY = dl.y; dl.jumpH = dl.heading;
+            if (splashes.length < 90) splashes.push({ x: dl.x, y: dl.y, age: 0, life: 0.9, maxR: 14 + Math.random() * 6 });
+            dbreached = true;
+          }
+        }
+        if (!dbreached) {
+          var dspot = pickSeaSpot(dl);
+          if (dspot !== -1) {
+            dl.tx = (dspot % W + 0.5) * TILE; dl.ty = (((dspot / W) | 0) + 0.5) * TILE;
+          }
+        }
+      }
+      dl.speed = 40 + Math.random() * 20;
+      ddx2 = dl.tx - dl.x; ddy2 = dl.ty - dl.y;
+    }
+    // bank toward the target with a gentle sway
+    var dwant = Math.atan2(ddy2, ddx2);
+    var ddw = dwant - dl.heading;
+    while (ddw > Math.PI) ddw -= Math.PI * 2;
+    while (ddw < -Math.PI) ddw += Math.PI * 2;
+    // shore ahead (within a tile of it)? turn away from it, toward whichever
+    // side still has open sea, before ever touching land
+    var dlahead = TILE * 2.5;
+    var dfwd = dl.heading;
+    var dlAng = dfwd - 0.6, drAng = dfwd + 0.6;
+    var dsAhead = openSeaAt(dl.x + Math.cos(dfwd) * dlahead, dl.y + Math.sin(dfwd) * dlahead);
+    var dsLeft = openSeaAt(dl.x + Math.cos(dlAng) * dlahead, dl.y + Math.sin(dlAng) * dlahead);
+    var dsRight = openSeaAt(dl.x + Math.cos(drAng) * dlahead, dl.y + Math.sin(drAng) * dlahead);
+    if (!dsAhead) {
+      if (dsLeft && !dsRight) dl.heading -= 3 * dt;
+      else dl.heading += 3 * dt; // right open, or blocked both ways: keep banking around
+    }
+    else dl.heading += Math.max(-1, Math.min(1, ddw)) * 2 * dt;
+    dl.heading += Math.sin(dl.wig * 0.3) * 0.2 * dt;
+    var dnx2 = dl.x + Math.cos(dl.heading) * dl.speed * dt;
+    var dny2 = dl.y + Math.sin(dl.heading) * dl.speed * dt;
+    // drifting within a tile of shore: escape to nearby open sea and stop
+    // chasing the wander target until safely out (never freezes in place).
+    // Heading snaps straight at open water — no graceful arc while beached.
+    if (!openSeaAt(dnx2, dny2)) {
+      var desc = nearestOpenSea(dl.x, dl.y);
+      if (desc) {
+        dl.tx = desc.x; dl.ty = desc.y;
+        dl.timer = Math.max(dl.timer, 4);
+      }
+      dl.heading = Math.atan2(dl.ty - dl.y, dl.tx - dl.x);
+      dnx2 = dl.x + Math.cos(dl.heading) * dl.speed * dt;
+      dny2 = dl.y + Math.sin(dl.heading) * dl.speed * dt;
+    }
+    // keep inside the world (clamp instead of freezing in place)
+    if (dnx2 < 8) dnx2 = 8; else if (dnx2 > WORLD_PX - 8) dnx2 = WORLD_PX - 8;
+    if (dny2 < 8) dny2 = 8; else if (dny2 > WORLD_PY - 8) dny2 = WORLD_PY - 8;
+    dl.x = dnx2; dl.y = dny2;
+  }
+  // Always exactly 20 dolphin shadows (safety net — they never die or breed)
+  dolphinCheckT += dt;
+  if (dolphinCheckT > 1) {
+    dolphinCheckT = 0;
+    while (dolphins.length < DOLPHIN_COUNT && seaFishSpots.length) {
+      var dto3 = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
+      spawnDolphin((dto3 % W + 0.5) * TILE, (((dto3 / W) | 0) + 0.5) * TILE);
+    }
+  }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
 }
 
@@ -5545,6 +6178,244 @@ function drawSnowyOwl(ow) {
   ctx.closePath(); ctx.fill();
   ctx.restore();
 }
+function drawSeagull(gu) {
+  // Seagull from above: white body, pale grey wings with dark wingtips,
+  // small head with a yellow-orange beak. Soft shadow below while flying.
+  var sc = gu.sc;
+  var wing = Math.sin(gu.flap); // -1 tucked .. +1 raised
+  ctx.save();
+  ctx.translate(gu.x, gu.y);
+  // shadow on the waves below, offset a little behind the bird
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(-6 * sc, 4 * sc, 13 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.rotate(gu.heading);
+  var lift = wing * 3.5 * sc;
+  for (var side = -1; side <= 1; side += 2) {
+    // long narrow wing, root buried inside the body so it stays attached
+    var sweep = side * 0.22 + wing * side * 0.08;
+    var cx = -1 * sc, cy = side * (8 * sc + lift * 0.3);
+    ctx.fillStyle = '#f2f4f0';
+    ctx.beginPath(); ctx.ellipse(cx, cy, 2.8 * sc, 9.5 * sc, sweep, 0, 7); ctx.fill();
+    // pale grey trailing half
+    ctx.fillStyle = '#c3c9cd';
+    ctx.beginPath(); ctx.ellipse(cx - 1.4 * sc, cy + side * 1 * sc, 1.7 * sc, 8.4 * sc, sweep, 0, 7); ctx.fill();
+    // dark wingtip
+    ctx.fillStyle = '#4a4d52';
+    ctx.beginPath(); ctx.ellipse(cx - 0.5 * sc, cy + side * 8.6 * sc, 1.9 * sc, 1.8 * sc, sweep, 0, 7); ctx.fill();
+  }
+  // notched tail
+  ctx.fillStyle = '#eef1ec';
+  ctx.beginPath();
+  ctx.moveTo(-7 * sc, 0);
+  ctx.lineTo(-12 * sc, -3 * sc);
+  ctx.lineTo(-11 * sc, 0);
+  ctx.lineTo(-12 * sc, 3 * sc);
+  ctx.closePath(); ctx.fill();
+  // white body
+  ctx.fillStyle = '#f7f9f5';
+  ctx.beginPath(); ctx.ellipse(0, 0, 7 * sc, 3 * sc, 0, 0, 7); ctx.fill();
+  // small head with black eyes and a yellow-orange beak
+  ctx.fillStyle = '#f7f9f5';
+  ctx.beginPath(); ctx.arc(8 * sc, 0, 2.4 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(8.4 * sc, -1.2 * sc, 0.7 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(8.4 * sc, 1.2 * sc, 0.7 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(8.6 * sc, -1.4 * sc, 0.25 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(8.6 * sc, 1 * sc, 0.25 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#e8912d';
+  ctx.beginPath();
+  ctx.moveTo(9.8 * sc, -0.9 * sc); ctx.lineTo(12 * sc, 0); ctx.lineTo(9.8 * sc, 0.9 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawSeaTurtle(bt) {
+  // At sea: a dark translucent shadow seen through the water. Hauled out on
+  // the beach: a full-color realistic turtle (babies always read as shadows).
+  var sc = bt.sc;
+  var pad = Math.sin(bt.paddle); // -1 .. +1 flipper stroke
+  var btx = Math.floor(bt.x / TILE), bty = Math.floor(bt.y / TILE);
+  var dry = !bt.baby && inBounds(btx, bty) && biome[idx(btx, bty)] === SAND;
+  if (dry) {
+    // hauled-out realistic turtle: olive shell with scutes, pale rim,
+    // mottled skin, eyes on the head
+    var lpad = Math.sin(bt.paddle * 0.6) * 0.4;
+    ctx.save();
+    ctx.translate(bt.x, bt.y);
+    ctx.rotate(bt.heading);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(0, 1 * sc, 10 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+    // long front flippers, splayed
+    ctx.fillStyle = '#6f7a4a';
+    ctx.beginPath(); ctx.ellipse(3 * sc, -(8 + lpad) * sc, 6 * sc, 2.2 * sc, -0.5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(3 * sc, (8 + lpad) * sc, 6 * sc, 2.2 * sc, 0.5, 0, 7); ctx.fill();
+    // rear flippers
+    ctx.beginPath(); ctx.ellipse(-6 * sc, -5.5 * sc, 3.2 * sc, 1.6 * sc, -0.4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-6 * sc, 5.5 * sc, 3.2 * sc, 1.6 * sc, 0.4, 0, 7); ctx.fill();
+    // big olive shell with a darker middle
+    ctx.fillStyle = '#66713f';
+    ctx.beginPath(); ctx.ellipse(0, 0, 9 * sc, 6.5 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#4c5730';
+    ctx.beginPath(); ctx.ellipse(0, 0, 6.5 * sc, 4.5 * sc, 0, 0, 7); ctx.fill();
+    // scute seams radiating out
+    ctx.strokeStyle = '#39411f';
+    ctx.lineWidth = 1.2 * sc;
+    for (var sct = 0; sct < 8; sct++) {
+      var sa = (sct / 8) * Math.PI * 2 + 0.2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(sa) * 2 * sc, Math.sin(sa) * 1.5 * sc);
+      ctx.lineTo(Math.cos(sa) * 6 * sc, Math.sin(sa) * 4 * sc);
+      ctx.stroke();
+    }
+    // pale rim + light mottling
+    ctx.strokeStyle = '#c9bd8a';
+    ctx.lineWidth = 1.5 * sc;
+    ctx.beginPath(); ctx.ellipse(0, 0, 9 * sc, 6.5 * sc, 0, 0, 7); ctx.stroke();
+    ctx.fillStyle = 'rgba(201,189,138,0.5)';
+    ctx.beginPath(); ctx.ellipse(-3 * sc, -2 * sc, 1.4 * sc, 1 * sc, 0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(2 * sc, 2.5 * sc, 1.2 * sc, 0.9 * sc, -0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(4 * sc, -1 * sc, 1 * sc, 0.8 * sc, 0, 0, 7); ctx.fill();
+    // head with eyes
+    ctx.fillStyle = '#7a8455';
+    ctx.beginPath(); ctx.arc(10.5 * sc, 0, 2.6 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(11 * sc, -1.4 * sc, 0.8 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(11 * sc, 1.4 * sc, 0.8 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(11.2 * sc, -1.6 * sc, 0.3 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(11.2 * sc, 1.2 * sc, 0.3 * sc, 0, 7); ctx.fill();
+    // tail nub
+    ctx.fillStyle = '#6f7a4a';
+    ctx.beginPath();
+    ctx.moveTo(-8.5 * sc, -1.2 * sc); ctx.lineTo(-11.5 * sc, 0); ctx.lineTo(-8.5 * sc, 1.2 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.translate(bt.x, bt.y);
+  ctx.rotate(bt.heading);
+  ctx.globalAlpha = 0.55; // murky silhouette under the surface
+  // big front flippers, paddling gently
+  ctx.fillStyle = '#12303c';
+  ctx.beginPath(); ctx.ellipse(2 * sc, -(7 + pad * 0.8) * sc, 5.5 * sc, 2 * sc, -0.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(2 * sc, (7 + pad * 0.8) * sc, 5.5 * sc, 2 * sc, 0.5, 0, 7); ctx.fill();
+  // small back flippers
+  ctx.beginPath(); ctx.ellipse(-6 * sc, -5 * sc, 3 * sc, 1.4 * sc, -0.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-6 * sc, 5 * sc, 3 * sc, 1.4 * sc, 0.4, 0, 7); ctx.fill();
+  // oval shell outline with a lighter rim
+  ctx.fillStyle = '#0e2833';
+  ctx.beginPath(); ctx.ellipse(0, 0, 8 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#2a4a56';
+  ctx.lineWidth = 1.5 * sc;
+  ctx.beginPath(); ctx.ellipse(0, 0, 8 * sc, 5.5 * sc, 0, 0, 7); ctx.stroke();
+  // shell ridge down the middle
+  ctx.beginPath(); ctx.moveTo(6 * sc, 0); ctx.lineTo(-6 * sc, 0); ctx.stroke();
+  // small head poking out front
+  ctx.fillStyle = '#12303c';
+  ctx.beginPath(); ctx.arc(9.5 * sc, 0, 2.2 * sc, 0, 7); ctx.fill();
+  // short tail
+  ctx.beginPath();
+  ctx.moveTo(-7.5 * sc, -1 * sc); ctx.lineTo(-10.5 * sc, 0); ctx.lineTo(-7.5 * sc, 1 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawDolphin(dl) {
+  // Dolphin shadow seen through the water: a dark translucent silhouette.
+  // Mid-breach dolphins draw full-color and bigger (higher = closer).
+  var air = dl.state === 'jump' ? Math.sin(Math.max(0, Math.min(1, 1 - dl.jumpT / 1.5)) * Math.PI) : 0;
+  var sc = dl.sc * (1 + 0.35 * air);
+  var pump = Math.sin(dl.wig) * 1.5 * sc; // vertical tail beat, foreshortened from above
+  if (air > 0) {
+    // breaching: full-color dolphin arcing over the waves
+    ctx.save();
+    ctx.translate(dl.x, dl.y);
+    ctx.fillStyle = 'rgba(10,40,80,' + (0.22 * (1 - air)).toFixed(3) + ')';
+    ctx.beginPath(); ctx.ellipse(-4 * sc, 4 * sc, 10 * sc, 4.5 * sc, 0, 0, 7); ctx.fill();
+    ctx.rotate(dl.heading);
+    // tucked pectoral fins
+    ctx.fillStyle = '#41606f';
+    ctx.beginPath(); ctx.ellipse(1 * sc, -4.5 * sc, 2.8 * sc, 1.2 * sc, -0.6, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(1 * sc, 4.5 * sc, 2.8 * sc, 1.2 * sc, 0.6, 0, 7); ctx.fill();
+    // slate-blue back with a darker cape
+    ctx.fillStyle = '#55778a';
+    ctx.beginPath(); ctx.ellipse(0, 0, 10 * sc, 3.2 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#3d5a6b';
+    ctx.beginPath(); ctx.ellipse(-2 * sc, 0, 7 * sc, 2.4 * sc, 0, 0, 7); ctx.fill();
+    // pale melon on the forehead + white lower jaw
+    ctx.fillStyle = '#7fa3b5';
+    ctx.beginPath(); ctx.ellipse(6 * sc, 0, 3 * sc, 2.2 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#e8eef0';
+    ctx.beginPath(); ctx.ellipse(9 * sc, 0, 2.4 * sc, 1.4 * sc, 0, 0, 7); ctx.fill();
+    // curved dorsal fin
+    ctx.fillStyle = '#3d5a6b';
+    ctx.beginPath();
+    ctx.moveTo(-3 * sc, 0); ctx.quadraticCurveTo(-1 * sc, -4 * sc, 1.5 * sc, -1.2 * sc);
+    ctx.lineTo(1.5 * sc, 1.2 * sc); ctx.quadraticCurveTo(-1 * sc, 0.5 * sc, -3 * sc, 0);
+    ctx.closePath(); ctx.fill();
+    // beaked snout with a smile
+    ctx.fillStyle = '#5a7f92';
+    ctx.beginPath();
+    ctx.moveTo(8 * sc, -1.6 * sc); ctx.lineTo(12.5 * sc, 0); ctx.lineTo(8 * sc, 1.6 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#2c4450';
+    ctx.lineWidth = 0.9 * sc;
+    ctx.beginPath(); ctx.arc(8.5 * sc, 0, 2.6 * sc, 0.5, Math.PI - 0.5); ctx.stroke();
+    // eye with a shine
+    ctx.fillStyle = '#10222b';
+    ctx.beginPath(); ctx.arc(7.5 * sc, -1.8 * sc, 0.9 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(7.5 * sc, 1.8 * sc, 0.9 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(7.7 * sc, -2 * sc, 0.3 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(7.7 * sc, 1.6 * sc, 0.3 * sc, 0, 7); ctx.fill();
+    // full-color tail flukes, pumping up and down
+    ctx.fillStyle = '#3d5a6b';
+    ctx.beginPath(); ctx.ellipse(-8.5 * sc, 0, 3.6 * sc, 1.4 * sc, 0, 0, 7); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-10 * sc, -1.4 * sc);
+    ctx.lineTo((-16.5 * sc + pump), -4.6 * sc);
+    ctx.quadraticCurveTo((-14 * sc + pump), -1.8 * sc, (-13 * sc + pump * 0.5), -0.8 * sc);
+    ctx.lineTo((-12 * sc + pump * 0.5), 0);
+    ctx.lineTo((-13 * sc + pump * 0.5), 0.8 * sc);
+    ctx.quadraticCurveTo((-14 * sc + pump), 1.8 * sc, (-16.5 * sc + pump), 4.6 * sc);
+    ctx.lineTo(-10 * sc, 1.4 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.translate(dl.x, dl.y);
+  ctx.rotate(dl.heading);
+  ctx.globalAlpha = 0.55; // murky silhouette under the surface
+  ctx.fillStyle = '#14313d';
+  // narrow tail stock flowing into the flukes (all one connected shape),
+  // pumping up and down with the stroke
+  ctx.beginPath(); ctx.ellipse(-8.5 * sc, 0, 3.6 * sc, 1.4 * sc, 0, 0, 7); ctx.fill();
+  // tail flukes: swept pointed lobes with a center notch
+  ctx.beginPath();
+  ctx.moveTo(-10 * sc, -1.4 * sc);
+  ctx.lineTo((-16.5 * sc + pump), -4.6 * sc);
+  ctx.quadraticCurveTo((-14 * sc + pump), -1.8 * sc, (-13 * sc + pump * 0.5), -0.8 * sc);
+  ctx.lineTo((-12 * sc + pump * 0.5), 0);
+  ctx.lineTo((-13 * sc + pump * 0.5), 0.8 * sc);
+  ctx.quadraticCurveTo((-14 * sc + pump), 1.8 * sc, (-16.5 * sc + pump), 4.6 * sc);
+  ctx.lineTo(-10 * sc, 1.4 * sc);
+  ctx.closePath(); ctx.fill();
+  // swept pectoral fins
+  ctx.beginPath(); ctx.ellipse(1 * sc, -5 * sc, 3.6 * sc, 1.3 * sc, -0.6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(1 * sc, 5 * sc, 3.6 * sc, 1.3 * sc, 0.6, 0, 7); ctx.fill();
+  // sleek body
+  ctx.beginPath(); ctx.ellipse(0, 0, 10 * sc, 3 * sc, 0, 0, 7); ctx.fill();
+  // dorsal fin on the spine
+  ctx.beginPath();
+  ctx.moveTo(-2 * sc, 0); ctx.lineTo(0.5 * sc, -1 * sc); ctx.lineTo(0.5 * sc, 1 * sc);
+  ctx.closePath(); ctx.fill();
+  // beaked snout
+  ctx.beginPath();
+  ctx.moveTo(8 * sc, -1.6 * sc); ctx.lineTo(12 * sc, 0); ctx.lineTo(8 * sc, 1.6 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
 function drawPlayer(sx, sy, t) {
   // Small round explorer (smaller than a tree); fades when hiding
   ctx.globalAlpha = playerA;
@@ -5912,6 +6783,34 @@ function render(t, rdt) {
     }
   }
 
+  // Sea turtle nests on the beach: piled sand with eggs peeking out
+  for (var tni2 = 0; tni2 < turtleNests.length; tni2++) {
+    var tn2 = turtleNests[tni2];
+    if (tn2.x < cam.x - 60 || tn2.x > cam.x + viewW + 60 || tn2.y < cam.y - 60 || tn2.y > cam.y + viewH + 60) continue;
+    ctx.fillStyle = 'rgba(190,160,110,0.9)';
+    ctx.beginPath(); ctx.ellipse(tn2.x, tn2.y + 2, 10, 7, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#d9cba8';
+    ctx.beginPath(); ctx.ellipse(tn2.x, tn2.y, 7, 5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f4efe2';
+    ctx.beginPath(); ctx.arc(tn2.x - 3, tn2.y - 1, 1.8, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(tn2.x + 1, tn2.y - 2, 1.8, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(tn2.x + 4, tn2.y, 1.6, 0, 7); ctx.fill();
+  }
+  // Sea turtle shadows gliding under the water (drawn before the fish,
+  // so the fish swim above them)
+  for (var tui2 = 0; tui2 < seaTurtles.length; tui2++) {
+    var bt2 = seaTurtles[tui2];
+    if (bt2.x < cam.x - 60 || bt2.x > cam.x + viewW + 60 || bt2.y < cam.y - 60 || bt2.y > cam.y + viewH + 60) continue;
+    drawSeaTurtle(bt2);
+  }
+  // Dolphin shadows under the water too, beside the turtles (breachers
+  // draw in the top pass, above the waves)
+  for (var dli2 = 0; dli2 < dolphins.length; dli2++) {
+    var dl2 = dolphins[dli2];
+    if (dl2.state === 'jump') continue;
+    if (dl2.x < cam.x - 60 || dl2.x > cam.x + viewW + 60 || dl2.y < cam.y - 60 || dl2.y > cam.y + viewH + 60) continue;
+    drawDolphin(dl2);
+  }
   // Fish gliding through the water (still body, motion does the work)
   for (var dfi = 0; dfi < fishes.length; dfi++) {
     var df = fishes[dfi];
@@ -6201,6 +7100,19 @@ function render(t, rdt) {
     var omg = (ow2.state === 'perch' || ow2.state === 'eat') ? 60 : 100;
     if (ow2.x < cam.x - omg || ow2.x > cam.x + viewW + omg || ow2.y < cam.y - omg || ow2.y > cam.y + viewH + omg) continue;
     drawSnowyOwl(ow2);
+  }
+  // Seagulls soar over everything too, high above the waves.
+  for (var gui2 = 0; gui2 < seagulls.length; gui2++) {
+    var gu2 = seagulls[gui2];
+    if (gu2.x < cam.x - 100 || gu2.x > cam.x + viewW + 100 || gu2.y < cam.y - 100 || gu2.y > cam.y + viewH + 100) continue;
+    drawSeagull(gu2);
+  }
+  // Breaching dolphins fly above the waves too, full-color mid-jump.
+  for (var dli3 = 0; dli3 < dolphins.length; dli3++) {
+    var dl3 = dolphins[dli3];
+    if (dl3.state !== 'jump') continue;
+    if (dl3.x < cam.x - 100 || dl3.x > cam.x + viewW + 100 || dl3.y < cam.y - 100 || dl3.y > cam.y + viewH + 100) continue;
+    drawDolphin(dl3);
   }
 
   // Screen-space UI (joystick, minimap)
