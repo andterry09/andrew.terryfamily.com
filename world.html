@@ -264,6 +264,8 @@ var hawkSpots = []; // regular tree tiles hawks can perch on (refilled in genera
 var EAGLE_COUNT = 3; // eagles: always exactly this many, roam the whole map, never die
 var eagles = []; // map-wide hunting eagles: fish, rabbits, hedgehogs, snakes, tarantulas, lizards, jackrabbits, frogs, ducks, armadillos, seagulls
 var treeSpots = []; // tree + pine tiles eagles carry prey to (refilled in generate)
+var dragon = null; // the one massive volcano dragon: eats anything that comes close, never leaves, never dies
+var volcCx = 0, volcCy = 0; // volcano middle in px (computed in generate)
 var jackCheckT = 0, snakeCheckT = 0, vultCheckT = 0, owlCheckT = 0, hawkCheckT = 0, gullCheckT = 0, turtleCheckT = 0, dolphinCheckT = 0, eagleCheckT = 0;
 var seagulls = []; // seagulls roaming overhead over the ocean
 var seaTurtles = []; // sea turtle shadows gliding under the ocean water
@@ -1104,9 +1106,8 @@ function generate(s) {
       var vdx = (x - VCX) / 5.5, vdy = (y - VCY) / 5;
       if (vdx * vdx + vdy * vdy >= 1) continue;
       if (biome[vci] === OCEAN) continue;
-      biome[vci] = WATER;
-      lava[vci] = 1; volc[vci] = 1;
-      elev[vci] = WATER_LEVEL - 0.05 - hash2(x, y, seed + 881) * 0.05;
+      setLava(x, y);
+      volc[vci] = 1;
     }
   }
   // cone slopes: dark basalt ground, with lava vents spurting near the rim
@@ -1116,8 +1117,7 @@ function generate(s) {
       if (!volcanoAt(x, y) || biome[vsi] === OCEAN) continue;
       volc[vsi] = 1;
       if (biome[vsi] === GRASS && hash2(x, y, seed + 882) < 0.12) {
-        biome[vsi] = WATER; lava[vsi] = 1;
-        elev[vsi] = WATER_LEVEL - 0.05 - hash2(x, y, seed + 883) * 0.05;
+        setLava(x, y); // lava vents spurting near the rim
       }
     }
   }
@@ -1134,31 +1134,45 @@ function generate(s) {
       if (!inBounds(vcx, vcy)) break;
       var vli = idx(vcx, vcy);
       if (biome[vli] === OCEAN) break; // rivers stop at the sea
-      if (biome[vli] === GRASS || biome[vli] === SAND) {
-        biome[vli] = WATER; lava[vli] = 1;
-        elev[vli] = WATER_LEVEL - 0.05 - hash2(vcx, vcy, seed + 887) * 0.05;
-      }
+      if (biome[vli] === GRASS || biome[vli] === SAND) setLava(vcx, vcy);
       if (hash2(vri * 17 + vrs, 41, seed + 888) < 0.5) { // widen to two tiles
         var vwx = vcx + Math.round(-Math.sin(vang)), vwy = vcy + Math.round(Math.cos(vang));
         if (inBounds(vwx, vwy)) {
           var vwi = idx(vwx, vwy);
-          if ((biome[vwi] === GRASS || biome[vwi] === SAND) && biome[vwi] !== OCEAN) {
-            biome[vwi] = WATER; lava[vwi] = 1;
-            elev[vwi] = WATER_LEVEL - 0.05 - hash2(vwx, vwy, seed + 887) * 0.05;
-          }
+          if ((biome[vwi] === GRASS || biome[vwi] === SAND) && biome[vwi] !== OCEAN) setLava(vwx, vwy);
         }
       }
     }
   }
-  // The crater buried the middle: move spawn to the nearest grass outside it
-  if (biome[idx(spawn.x, spawn.y)] !== GRASS) {
+  // Stone shores: any land tile touching lava outside the cone bakes
+  // into bare stone (no trees or plants, only rocks and dirt and stone).
+  // Marking them volc reuses every plant exclusion and the basalt look.
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var vshi = idx(x, y);
+      if (volc[vshi] || lava[vshi]) continue;
+      if (biome[vshi] !== GRASS && biome[vshi] !== SAND) continue;
+      var vshot = false;
+      for (var vshy = -1; vshy <= 1 && !vshot; vshy++) {
+        for (var vshx = -1; vshx <= 1 && !vshot; vshx++) {
+          if (!vshx && !vshy) continue;
+          if (!inBounds(x + vshx, y + vshy)) continue;
+          if (lava[idx(x + vshx, y + vshy)]) vshot = true;
+        }
+      }
+      if (vshot) volc[vshi] = 1;
+    }
+  }
+  // The crater buried the middle: move spawn to the nearest grass outside
+  // it (never bare volcano stone)
+  if (biome[idx(spawn.x, spawn.y)] !== GRASS || volc[idx(spawn.x, spawn.y)]) {
     var nspawn = null;
     for (var srad = 0; srad < W && !nspawn; srad++) {
       for (var say = -srad; say <= srad && !nspawn; say++) {
         for (var sax = -srad; sax <= srad && !nspawn; sax++) {
           if (Math.max(Math.abs(sax), Math.abs(say)) !== srad) continue;
           var sgx = spawn.x + sax, sgy = spawn.y + say;
-          if (inBounds(sgx, sgy) && biome[idx(sgx, sgy)] === GRASS) nspawn = { x: sgx, y: sgy };
+          if (inBounds(sgx, sgy) && biome[idx(sgx, sgy)] === GRASS && !volc[idx(sgx, sgy)]) nspawn = { x: sgx, y: sgy };
         }
       }
     }
@@ -1427,12 +1441,13 @@ function generate(s) {
     for (x = 0; x < W; x++) {
       var i3 = idx(x, y);
       if (biome[i3] !== GRASS || snow[i3] || rock[i3] || swp[i3] || volc[i3]) continue; // snowy woods grow pines instead; none on the rock flat, swamp or volcano
-      var vNear = false; // ...nor near the volcano (canopies spill ~2 tiles past the trunk)
+      var vNear = false; // ...nor near the volcano or any lava (canopies spill ~2 tiles past the trunk)
       for (var voy = -4; voy <= 4 && !vNear; voy++) {
         for (var vox = -4; vox <= 4 && !vNear; vox++) {
           if (!vox && !voy) continue;
           if (!inBounds(x + vox, y + voy)) continue;
-          if (volc[idx(x + vox, y + voy)]) vNear = true;
+          var vti = idx(x + vox, y + voy);
+          if (volc[vti] || lava[vti]) vNear = true;
         }
       }
       if (vNear) continue;
@@ -1514,7 +1529,8 @@ function generate(s) {
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var fi3 = idx(x, y);
-      if (biome[fi3] !== GRASS || snow[fi3] || solid[fi3] || rock[fi3]) continue;
+      if (biome[fi3] !== GRASS || snow[fi3] || solid[fi3] || rock[fi3] || swp[fi3] || volc[fi3]) continue;
+      if (lavaNearT(x, y, 4)) continue; // none near the lava field either
       if (savannaAt(x, y)) continue; // the savanna grows acacias instead
       var fsdx = x - spawn.x, fsdy = y - spawn.y;
       if (fsdx * fsdx + fsdy * fsdy < 36) continue;
@@ -1607,7 +1623,7 @@ function generate(s) {
     if (!inBounds(tx, ty)) return false;
     if (tx < 1 || ty < 1 || tx >= W - 1 || ty >= H - 1) return false; // keep crowns on-screen
     var pi = idx(tx, ty);
-    if (biome[pi] !== SAND || palms[pi] || trees[pi] || stumps[pi]) return false;
+    if (biome[pi] !== SAND || palms[pi] || trees[pi] || stumps[pi] || volc[pi]) return false;
     if (!palmBeach(tx, ty)) return false;
     if (!palmClear(tx, ty)) return false;
     for (var snoy = -3; snoy <= 3; snoy++) { // palms stay out of the snowy corner
@@ -1657,7 +1673,7 @@ function generate(s) {
   for (y = 0; y < H; y++) {
     for (x = 0; x < W; x++) {
       var oi = idx(x, y);
-      if (biome[oi] !== GRASS || volc[oi]) continue;
+      if (biome[oi] !== GRASS || volc[oi] || lavaNearT(x, y, 2)) continue;
       var oe = true;
       for (var oy = y - 2; oy <= y + 2 && oe; oy++) {
         for (var ox = x - 2; ox <= x + 2 && oe; ox++) {
@@ -1821,6 +1837,7 @@ function generate(s) {
         }
       }
       if (wet) continue;
+      if (lavaNearT(x, y, 3)) continue; // keep bushes off the lava field too
       if (hash2(x, y, seed + 9) < 0.07) {
         bushes[i4] = 1;
         berryN[i4] = 3;
@@ -1962,6 +1979,7 @@ function generate(s) {
   eagles = [];
   treeSpots = [];
   eagleCheckT = 0;
+  dragon = null;
   seagulls = [];
   seaTurtles = [];
   dolphins = [];
@@ -2553,6 +2571,49 @@ function generate(s) {
     var eo2 = treeSpots[(Math.random() * treeSpots.length) | 0];
     spawnEagle((eo2 % W + 0.5) * TILE, (((eo2 / W) | 0) + 0.5) * TILE);
   }
+  // Volcano middle, and the one massive dragon living in it
+  (function () {
+    var vn = 0, vsx = 0, vsy = 0;
+    for (var vy = 0; vy < H; vy++) {
+      for (var vx = 0; vx < W; vx++) {
+        if (volc[idx(vx, vy)]) { vn++; vsx += vx; vsy += vy; }
+      }
+    }
+    if (vn) { volcCx = (vsx / vn + 0.5) * TILE; volcCy = (vsy / vn + 0.5) * TILE; }
+    if (vn) spawnDragon(volcCx, volcCy);
+  })();
+  // Two bunny burrows on the volcano cone so the dragon has dinner nearby.
+  // Hash-ordered (no rand) so later rand layouts stay exactly as before.
+  (function () {
+    var vcands = [];
+    for (var vy = 0; vy < H; vy++) {
+      for (var vx = 0; vx < W; vx++) {
+        var vi = idx(vx, vy);
+        if (biome[vi] !== GRASS || !volc[vi] || lava[vi] || solid[vi] || bushes[vi] || stumps[vi]) continue;
+        var vdx = (vx + 0.5) * TILE - volcCx, vdy = (vy + 0.5) * TILE - volcCy;
+        if (vdx * vdx + vdy * vdy > 300 * 300) continue; // close enough to smell
+        vcands.push(vi);
+      }
+    }
+    vcands.sort(function (a, b) {
+      return hash2(a % W, (a / W) | 0, seed + 863) - hash2(b % W, (b / W) | 0, seed + 863);
+    });
+    var vwanted = 2;
+    for (var vbi = 0; vbi < vcands.length && vwanted > 0; vbi++) {
+      var vX = (vcands[vbi] % W + 0.5) * TILE, vY = (((vcands[vbi] / W) | 0) + 0.5) * TILE;
+      var vFar = true;
+      for (var vpi = 0; vpi < burrows.length; vpi++) {
+        var vbdx = vX - burrows[vpi].x, vbdy = vY - burrows[vpi].y;
+        if (vbdx * vbdx + vbdy * vbdy < 150 * 150) { vFar = false; break; }
+      }
+      if (!vFar) continue;
+      var vbur = { x: vX, y: vY, breedT: 30 + hash2(vcands[vbi] % W, (vcands[vbi] / W) | 0, seed + 864) * 30 };
+      burrows.push(vbur);
+      spawnBunny(vbur, false);
+      spawnBunny(vbur, false);
+      vwanted--;
+    }
+  })();
 
   buildMinimap();
   return spawn;
@@ -2582,7 +2643,8 @@ function buildMinimap() {
       else if (boulder[i]) { r = 110; g = 106; b = 98; }
       else if (deadTree[i]) { r = 150; g = 140; b = 125; }
       else if (biome[i] === SAND) {
-        if (des[i]) { r = 235; g = 200; b = 118; }
+        if (volc[i]) { r = 70; g = 62; b = 56; }
+        else if (des[i]) { r = 235; g = 200; b = 118; }
         else { r = 244; g = 226; b = 133; }
       }
       else if (acacias[i]) { r = 110; g = 118; b = 58; }
@@ -2706,6 +2768,51 @@ function volcanoAt(x, y) {
   var wob = (fbm(x * 0.05 + 1100, y * 0.05 + 1100, 2) - 0.5) * 6;
   var dx = (x - 120) / (20 + wob), dy = (y - 118) / (18 + wob);
   return dx * dx + dy * dy < 1;
+}
+// Flood one tile with lava, scrubbing any region flags off it (a lava
+// tile is lava, not savanna/desert/swamp/mud anymore)
+function setLava(tx, ty) {
+  var li = idx(tx, ty);
+  biome[li] = WATER; lava[li] = 1;
+  swp[li] = 0; sav[li] = 0; des[li] = 0; mud[li] = 0;
+  elev[li] = WATER_LEVEL - 0.05 - hash2(tx, ty, seed + 887) * 0.05;
+}
+// Heading directly away from nearby lava (radius r tiles), or null when
+// clear — animals use it to keep their distance
+function lavaRepel(px, py, r) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  var sx = 0, sy = 0, found = false;
+  for (var oy = -r; oy <= r; oy++) {
+    for (var ox = -r; ox <= r; ox++) {
+      if (!ox && !oy) continue;
+      var nx = tx + ox, ny = ty + oy;
+      if (!inBounds(nx, ny) || !lava[idx(nx, ny)]) continue;
+      var dx = px - (nx + 0.5) * TILE, dy = py - (ny + 0.5) * TILE;
+      var d2 = dx * dx + dy * dy + 400;
+      sx += dx / d2; sy += dy / d2;
+      found = true;
+    }
+  }
+  if (!found) return null;
+  if (sx * sx + sy * sy < 1e-9) return Math.random() * Math.PI * 2; // ringed: any way out
+  return Math.atan2(sy, sx);
+}
+// A wander heading that shies away from lava (falls back to random)
+function lavaSafeHeading(px, py, r) {
+  var a = lavaRepel(px, py, r);
+  return a === null ? Math.random() * Math.PI * 2 : a;
+}
+// True if any lava within r tiles of a map tile (for keeping the lava
+// field itself plant-free)
+function lavaNearT(tx, ty, r) {
+  for (var oy = -r; oy <= r; oy++) {
+    for (var ox = -r; ox <= r; ox++) {
+      var nx = tx + ox, ny = ty + oy;
+      if (!inBounds(nx, ny)) continue;
+      if (lava[idx(nx, ny)]) return true;
+    }
+  }
+  return false;
 }
 function pineScale(tx, ty) { return 2.8 + hash2(tx, ty, 621) * 0.6; } // 2.8 - 3.4x, the giants up north
 function palmScale(tx, ty) { return 1.8 + hash2(tx, ty, 301) * 0.5; } // 1.8 - 2.3x, like regular trees
@@ -3592,6 +3699,146 @@ function nearestCarcass(vu, maxDist) {
     if (d < bd) { bd = d; best = ck; }
   }
   return best;
+}
+// The one massive volcano dragon. Lives in the volcano, eats anything dumb
+// enough to wander close, never leaves, never dies. There is only ever one.
+function spawnDragon(x, y) {
+  dragon = {
+    x: x, y: y,
+    heading: Math.random() * Math.PI * 2,
+    tx: x, ty: y,
+    state: 'lurk',
+    timer: 2 + Math.random() * 3,
+    sc: 4.2,
+    flap: Math.random() * 10,
+    speed: 45,
+    meal: null, gulpT: 0,
+    scanT: 0
+  };
+}
+// Nearest animal of any land kind within maxDist px of the dragon.
+// Returns {ref, kind} or null. Held/hidden/dying ones don't count.
+function nearestDragonPrey(dr, maxDist) {
+  var best = null, bestKind = null, bd = maxDist * maxDist;
+  var i, e, dx, dy, d;
+  function consider(cand, kind) {
+    dx = cand.x - dr.x; dy = cand.y - dr.y; d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = cand; bestKind = kind; }
+  }
+  for (i = 0; i < bunnies.length; i++) {
+    e = bunnies[i];
+    if (e.state === 'dying' || e.state === 'inside' || e.state === 'caught') continue;
+    consider(e, 'bunny');
+  }
+  for (i = 0; i < hedgehogs.length; i++) {
+    e = hedgehogs[i];
+    if (e.state === 'dying' || e.state === 'caught') continue;
+    consider(e, 'hedge');
+  }
+  for (i = 0; i < warthogs.length; i++) { consider(warthogs[i], 'warthog'); }
+  for (i = 0; i < jacks.length; i++) {
+    e = jacks[i];
+    if (e.state === 'dying' || e.state === 'inside' || e.state === 'caught') continue;
+    consider(e, 'jack');
+  }
+  for (i = 0; i < snakes.length; i++) {
+    e = snakes[i];
+    if (e.state === 'caught') continue;
+    consider(e, 'snake');
+  }
+  for (i = 0; i < ducks.length; i++) {
+    e = ducks[i];
+    if (e.chick || e.state === 'dying' || e.state === 'snatched' || e.eagleHeld) continue;
+    consider(e, 'duck');
+  }
+  for (i = 0; i < frogs.length; i++) {
+    e = frogs[i];
+    if (e.state === 'caught') continue;
+    consider(e, 'frog');
+  }
+  for (i = 0; i < lizards.length; i++) {
+    e = lizards[i];
+    if (e.state === 'hide' || e.state === 'caught') continue;
+    consider(e, 'lizard');
+  }
+  for (i = 0; i < armadillos.length; i++) {
+    e = armadillos[i];
+    if (e.state === 'caught') continue;
+    consider(e, 'dillo');
+  }
+  for (i = 0; i < tarantulas.length; i++) {
+    e = tarantulas[i];
+    if (e.state === 'hide' || e.state === 'caught') continue;
+    consider(e, 'tar');
+  }
+  for (i = 0; i < ants.length; i++) {
+    e = ants[i];
+    if (e.state === 'caught') continue;
+    consider(e, 'ant');
+  }
+  if (!best) return null;
+  return { ref: best, kind: bestKind };
+}
+// True if the dragon's target is still alive and catchable
+function dragonPreyAlive(dg) {
+  var pr = dg.prey;
+  if (!pr) return false;
+  if (dg.preyKind === 'bunny') return bunnies.indexOf(pr) !== -1 && pr.state !== 'dying' && pr.state !== 'inside';
+  if (dg.preyKind === 'hedge') return hedgehogs.indexOf(pr) !== -1 && pr.state !== 'dying';
+  if (dg.preyKind === 'warthog') return warthogs.indexOf(pr) !== -1;
+  if (dg.preyKind === 'jack') return jacks.indexOf(pr) !== -1 && pr.state !== 'dying' && pr.state !== 'inside';
+  if (dg.preyKind === 'snake') return snakes.indexOf(pr) !== -1;
+  if (dg.preyKind === 'duck') return ducks.indexOf(pr) !== -1 && !pr.chick && pr.state !== 'dying' && pr.state !== 'snatched' && !pr.eagleHeld;
+  if (dg.preyKind === 'frog') return frogs.indexOf(pr) !== -1;
+  if (dg.preyKind === 'lizard') return lizards.indexOf(pr) !== -1 && pr.state !== 'hide';
+  if (dg.preyKind === 'dillo') return armadillos.indexOf(pr) !== -1;
+  if (dg.preyKind === 'tar') return tarantulas.indexOf(pr) !== -1 && pr.state !== 'hide';
+  if (dg.preyKind === 'ant') return ants.indexOf(pr) !== -1;
+  return false;
+}
+// The dragon swallows its catch whole — and a replacement of the same kind
+// appears back in that kind's home area, so no population ever declines.
+function dragonRespawnPrey(kind, snowHint) {
+  function pick(list) { return list.length ? list[(Math.random() * list.length) | 0] : null; }
+  if (kind === 'bunny') {
+    var bb = pick(burrows);
+    if (bb) spawnBunny(bb, false);
+  } else if (kind === 'hedge') {
+    if (snowHint && snowHogSpots.length) {
+      var sh = snowHogSpots[(Math.random() * snowHogSpots.length) | 0];
+      spawnHedgehog((sh % W + 0.5) * TILE, (((sh / W) | 0) + 0.5) * TILE, false, true);
+    } else {
+      var hs = pick(hedgeSpots);
+      if (hs) spawnHedgehog((hs % W + 0.5) * TILE, (((hs / W) | 0) + 0.5) * TILE, false, snow[hs] === 1);
+    }
+  } else if (kind === 'warthog') {
+    var hg = pick(hogSpots);
+    if (hg) spawnWarthog((hg % W + 0.5) * TILE, (((hg / W) | 0) + 0.5) * TILE);
+  } else if (kind === 'jack') {
+    var jb = pick(jackBurrows);
+    if (jb) spawnJack(jb, false);
+  } else if (kind === 'snake') {
+    var sn = pick(desSpots);
+    if (sn) spawnSnake((sn % W + 0.5) * TILE, (((sn / W) | 0) + 0.5) * TILE);
+  } else if (kind === 'duck') {
+    if (duckSpots.length) {
+      var ds = duckSpots[(Math.random() * duckSpots.length) | 0];
+      spawnDuck((ds % W + 0.5) * TILE, (((ds / W) | 0) + 0.5) * TILE);
+    }
+  } else if (kind === 'frog') {
+    var fr = pick(frogSpots);
+    if (fr) spawnFrog((fr % W + 0.5) * TILE, (((fr / W) | 0) + 0.5) * TILE);
+  } else if (kind === 'lizard') {
+    var lh = pick(lizardHoles);
+    if (lh) spawnLizard(lh);
+  } else if (kind === 'dillo') {
+    var ar = pick(hogSpots);
+    if (ar) spawnArmadillo((ar % W + 0.5) * TILE, (((ar / W) | 0) + 0.5) * TILE);
+  } else if (kind === 'tar') {
+    if (boulderSpots.length) spawnTarantula();
+  } else if (kind === 'ant') {
+    spawnAnt();
+  }
 }
 // An eagle soaring over the map. Hunts fish, rabbits, hedgehogs, snakes,
 // tarantulas, lizards, jackrabbits, frogs, ducks, armadillos and seagulls,
@@ -4706,10 +4953,16 @@ function update(dt) {
       if (!duckInSwamp(dk)) { dk.state = 'toWater'; dk.timer = 14; }
       else {
         dk.timer -= dt;
-        var ghunt = nearestHuntingGator(dk, 150);
-        if (ghunt) { // a gator is coming! waddle away fast
-          dk.tx = dk.x + (dk.x - ghunt.x);
-          dk.ty = dk.y + (dk.y - ghunt.y);
+        var lrD = lavaRepel(dk.x, dk.y, 3);
+        if (lrD !== null) { // lava first! paddle away from the heat
+          dk.tx = dk.x + Math.cos(lrD) * 120;
+          dk.ty = dk.y + Math.sin(lrD) * 120;
+        } else {
+          var ghunt = nearestHuntingGator(dk, 150);
+          if (ghunt) { // a gator is coming! waddle away fast
+            dk.tx = dk.x + (dk.x - ghunt.x);
+            dk.ty = dk.y + (dk.y - ghunt.y);
+          }
         }
         if (isInWater(dk.x, dk.y) && splashes.length < 90 && Math.random() < dt * 2) {
           // paddling through a pool on foot: little kicks of ripples
@@ -4776,7 +5029,7 @@ function update(dt) {
       if (bn.timer <= 0) {
         if (bn.resting) {
           bn.resting = false;
-          bn.heading = Math.random() * Math.PI * 2;
+          bn.heading = lavaSafeHeading(bn.x, bn.y, 3);
           bn.timer = 0.3 + Math.random() * 0.5;
           if (bn.craveT <= 0) { // hungry: go find berries
             bn.craveT = 15 + Math.random() * 20;
@@ -4798,7 +5051,7 @@ function update(dt) {
       }
       if (bn.state === 'hop' && !bn.resting) {
         if (!bunnyHop(bn, bn.baby ? 60 : 95, dt)) {
-          bn.heading = Math.random() * Math.PI * 2;
+          bn.heading = lavaSafeHeading(bn.x, bn.y, 3);
           bn.resting = true;
           bn.timer = 0.5;
         }
@@ -4896,7 +5149,7 @@ function update(dt) {
       if (hg.timer <= 0) {
         if (hg.resting) {
           hg.resting = false;
-          hg.heading = Math.random() * Math.PI * 2;
+          hg.heading = lavaSafeHeading(hg.x, hg.y, 3);
           hg.timer = 0.4 + Math.random() * 0.9;
           if (hg.craveT <= 0) {
             hg.craveT = 12 + Math.random() * 18;
@@ -4920,7 +5173,7 @@ function update(dt) {
       }
       if (!hg.resting) {
         if (!hedgeStep(hg, hg.baby ? 40 : 55, dt)) {
-          hg.heading = Math.random() * Math.PI * 2;
+          hg.heading = lavaSafeHeading(hg.x, hg.y, 3);
           hg.resting = true;
           hg.timer = 0.5;
         }
@@ -5040,7 +5293,9 @@ function update(dt) {
       if (!run && wt.timer <= 0) { wt.state = 'wander'; wt.resting = true; wt.timer = 0.5 + Math.random(); }
       else {
         if (run) wt.heading = Math.atan2(wt.y - run.y, wt.x - run.x) + Math.sin(wt.timer * 9 + wt.x * 0.05) * 0.3;
-        if (!hogStep(wt, 110, dt)) wt.heading = Math.random() * Math.PI * 2;
+        var lrW = lavaRepel(wt.x, wt.y, 4); // lava fear beats hyena fear
+        if (lrW !== null) wt.heading = lrW;
+        if (!hogStep(wt, 110, dt)) wt.heading = lavaSafeHeading(wt.x, wt.y, 4);
         if (wt.timer <= 0) wt.timer = 2.0;
       }
     } else if (wt.state === 'wander') {
@@ -5048,7 +5303,7 @@ function update(dt) {
       if (wt.timer <= 0) {
         if (wt.resting) {
           wt.resting = false;
-          wt.heading = Math.random() * Math.PI * 2;
+          wt.heading = lavaSafeHeading(wt.x, wt.y, 3);
           wt.timer = 0.5 + Math.random() * 1.1;
           if (wt.craveT <= 0) {
             wt.craveT = 12 + Math.random() * 18;
@@ -5072,7 +5327,7 @@ function update(dt) {
       }
       if (!wt.resting) {
         if (!hogStep(wt, 62, dt)) {
-          wt.heading = Math.random() * Math.PI * 2;
+          wt.heading = lavaSafeHeading(wt.x, wt.y, 3);
           wt.resting = true;
           wt.timer = 0.5;
         }
@@ -5181,7 +5436,7 @@ function update(dt) {
       } else if (hy.timer <= 0) {
         if (hy.resting) {
           hy.resting = false;
-          hy.heading = Math.random() * Math.PI * 2;
+          hy.heading = lavaSafeHeading(hy.x, hy.y, 3);
           hy.timer = 0.6 + Math.random() * 1.2;
           if (hy.huntCd <= 0) {
             var tgt = nearestWarthog(hy, 520);
@@ -5200,7 +5455,7 @@ function update(dt) {
       if (hy.state === 'wander' && !hy.resting) {
         hy.step += dt * 10;
         if (!hyenaStep(hy, 72, dt)) {
-          hy.heading = Math.random() * Math.PI * 2;
+          hy.heading = lavaSafeHeading(hy.x, hy.y, 3);
           hy.resting = true;
           hy.timer = 0.5;
         }
@@ -5315,7 +5570,7 @@ function update(dt) {
       if (ar.timer <= 0) {
         if (ar.resting) {
           ar.resting = false;
-          ar.heading = Math.random() * Math.PI * 2;
+          ar.heading = lavaSafeHeading(ar.x, ar.y, 3);
           ar.timer = 0.6 + Math.random() * 1.2;
         } else {
           ar.resting = true;
@@ -5324,7 +5579,7 @@ function update(dt) {
       }
       if (!ar.resting) {
         if (!hogStep(ar, 50, dt)) { // same savanna-only range as the warthogs
-          ar.heading = Math.random() * Math.PI * 2;
+          ar.heading = lavaSafeHeading(ar.x, ar.y, 3);
           ar.resting = true;
           ar.timer = 0.5;
         }
@@ -5381,6 +5636,7 @@ function update(dt) {
     }
     if (!lz.resting) {
       if (!lizStep(lz, 120, dt)) {
+        lz.heading = lavaSafeHeading(lz.x, lz.y, 3);
         lz.resting = true;
         lz.timer = 0.5;
       } else {
@@ -5415,7 +5671,7 @@ function update(dt) {
       if (fr.timer <= 0) {
         if (fr.resting) {
           fr.resting = false;
-          fr.heading = Math.random() * Math.PI * 2;
+          fr.heading = lavaSafeHeading(fr.x, fr.y, 3);
           fr.timer = 0.3 + Math.random() * 0.5; // short hop burst
         } else {
           fr.resting = true;
@@ -5425,7 +5681,7 @@ function update(dt) {
       if (!fr.resting) {
         fr.step += dt * 14;
         if (!frogHop(fr, 110, dt)) {
-          fr.heading = Math.random() * Math.PI * 2;
+          fr.heading = lavaSafeHeading(fr.x, fr.y, 3);
           fr.resting = true;
           fr.timer = 0.5;
         } else if (isInWater(fr.x, fr.y) && splashes.length < 90 && Math.random() < dt * 3) {
@@ -5455,7 +5711,7 @@ function update(dt) {
       if (ga.timer <= 0) {
         if (ga.resting) {
           ga.resting = false;
-          ga.heading = Math.random() * Math.PI * 2;
+          ga.heading = lavaSafeHeading(ga.x, ga.y, 3);
           ga.timer = 1 + Math.random() * 1.5;
           if (ga.huntCd <= 0) {
             var gtgt = nearestSwampDuck(ga, 420);
@@ -5470,7 +5726,7 @@ function update(dt) {
       if (!ga.resting) {
         ga.heading += Math.sin(ga.wig * 0.5) * dt * 0.8; // lazy S-swim
         if (!gatorStep(ga, 45, dt)) {
-          ga.heading = Math.random() * Math.PI * 2;
+          ga.heading = lavaSafeHeading(ga.x, ga.y, 3);
           ga.resting = true;
           ga.timer = 0.8;
         }
@@ -5626,6 +5882,7 @@ function update(dt) {
     }
     if (!ta.resting) {
       if (!lizStep(ta, 90, dt)) { // rock flat only, like the lizards
+        ta.heading = lavaSafeHeading(ta.x, ta.y, 3);
         ta.resting = true;
         ta.timer = 0.5;
       } else {
@@ -5675,7 +5932,7 @@ function update(dt) {
       if (!rockBlocked(annx, an.y)) an.x = annx;
       var anny = an.y + Math.sin(an.heading) * 100 * dt;
       if (!rockBlocked(an.x, anny)) an.y = anny;
-      if (Math.hypot(an.x - anox, an.y - anoy) < 100 * dt * 0.3) { an.resting = true; an.timer = 0.3; }
+      if (Math.hypot(an.x - anox, an.y - anoy) < 100 * dt * 0.3) { an.heading = lavaSafeHeading(an.x, an.y, 3); an.resting = true; an.timer = 0.3; }
     }
   }
   // Never fewer than 15 ants scurrying about the rocks
@@ -5725,7 +5982,7 @@ function update(dt) {
       if (jk.timer <= 0) {
         if (jk.resting) {
           jk.resting = false;
-          jk.heading = Math.random() * Math.PI * 2;
+          jk.heading = lavaSafeHeading(jk.x, jk.y, 3);
           jk.timer = 0.3 + Math.random() * 0.5;
           if (jk.homeT <= 0 && jk.home) {
             jk.homeT = 35 + Math.random() * 35;
@@ -5740,7 +5997,7 @@ function update(dt) {
       }
       if (jk.state === 'hop' && !jk.resting) {
         if (!jackHop(jk, jk.baby ? 60 : 95, dt)) {
-          jk.heading = Math.random() * Math.PI * 2;
+          jk.heading = lavaSafeHeading(jk.x, jk.y, 3);
           jk.resting = true;
           jk.timer = 0.5;
         }
@@ -5811,7 +6068,8 @@ function update(dt) {
     if (sn.state === 'slither') {
       sn.timer -= dt; sn.huntCd -= dt; sn.homeT -= dt;
       if (sn.timer <= 0) {
-        sn.heading += (Math.random() - 0.5) * 2.2;
+        var lrS = lavaRepel(sn.x, sn.y, 3);
+        sn.heading += lrS !== null ? (lrS - sn.heading) * 0.5 : (Math.random() - 0.5) * 2.2;
         sn.timer = 0.8 + Math.random() * 1.6;
         if (sn.huntCd <= 0) {
           sn.huntCd = 8 + Math.random() * 12;
@@ -5910,7 +6168,7 @@ function update(dt) {
       if (sb.timer <= 0) {
         if (sb.resting) {
           sb.resting = false;
-          sb.heading = Math.random() * Math.PI * 2;
+          sb.heading = lavaSafeHeading(sb.x, sb.y, 3);
           sb.timer = 0.5 + Math.random() * 0.8;
           if (sb.huntCd <= 0) {
             sb.huntCd = 10 + Math.random() * 12;
@@ -5928,7 +6186,7 @@ function update(dt) {
         sb.heading += Math.sin(sb.step * 0.7) * 1.4 * dt;
         if (Math.random() < dt * 0.9) sb.heading += (Math.random() - 0.5) * 2.2;
         if (!jackHop(sb, 105, dt)) { // desert sand only, like the jackrabbits
-          sb.heading = Math.random() * Math.PI * 2;
+          sb.heading = lavaSafeHeading(sb.x, sb.y, 3);
           sb.resting = true;
           sb.timer = 0.5;
         }
@@ -7293,6 +7551,100 @@ function update(dt) {
     }
     // Fish, turtles, crabs and the soaring birds are already fenced in by
     // their movement guards, so they need no audit.
+  }
+  // The volcano dragon: circles its crater, and snaps up any animal dumb
+  // enough to wander close. There is only ever one; it never leaves the
+  // volcano and never dies. Every meal respawns back home, so populations
+  // never decline.
+  if (dragon) {
+    var dg = dragon;
+    if (dg.state === 'gulp') {
+      // swallowing, throat bulging
+      dg.flap += dt * 2;
+      dg.gulpT -= dt;
+      if (dg.gulpT <= 0) {
+        dragonRespawnPrey(dg.meal, dg.mealSnow);
+        dg.meal = null;
+        dg.state = 'lurk'; dg.timer = 2 + Math.random() * 3;
+      }
+    } else {
+      dg.flap += dt * (dg.state === 'hunt' ? 9 : 4);
+      if (dg.state === 'hunt') {
+        // running down dinner: fast and direct
+        var dpr = dg.prey;
+        if (!dpr || !dragonPreyAlive(dg)) {
+          dg.prey = null; dg.preyKind = null; dg.state = 'lurk'; dg.timer = 1;
+        } else {
+          dg.heading = Math.atan2(dpr.y - dg.y, dpr.x - dg.x);
+          var dhdx = dpr.x - dg.x, dhdy = dpr.y - dg.y;
+          if (dhdx * dhdx + dhdy * dhdy < 34 * 34) {
+            // SNATCHED whole! free any jackrabbit it was holding first
+            if (dg.preyKind === 'snake' && dpr.prey && dpr.prey.state === 'caught') {
+              dpr.prey.state = 'hop'; dpr.prey.resting = true; dpr.prey.timer = 0.5;
+              dpr.prey = null;
+            }
+            var darr = dg.preyKind === 'bunny' ? bunnies : dg.preyKind === 'hedge' ? hedgehogs : dg.preyKind === 'warthog' ? warthogs : dg.preyKind === 'jack' ? jacks : dg.preyKind === 'snake' ? snakes : dg.preyKind === 'duck' ? ducks : dg.preyKind === 'frog' ? frogs : dg.preyKind === 'lizard' ? lizards : dg.preyKind === 'dillo' ? armadillos : dg.preyKind === 'tar' ? tarantulas : ants;
+            var dpi = darr.indexOf(dpr);
+            if (dpi !== -1) darr.splice(dpi, 1);
+            dg.meal = dg.preyKind;
+            dg.mealSnow = !!dpr.snow;
+            dg.prey = null; dg.preyKind = null;
+            dg.gulpT = 2.5;
+            dg.state = 'gulp';
+          } else {
+            var dstep = 95 * dt;
+            var dnx = dg.x + Math.cos(dg.heading) * dstep;
+            var dny = dg.y + Math.sin(dg.heading) * dstep;
+            var dtx = Math.floor(dnx / TILE), dty = Math.floor(dny / TILE);
+            if (!inBounds(dtx, dty) || !volc[idx(dtx, dty)]) {
+              // prey slipped out of the volcano: break off and circle home
+              dg.prey = null; dg.preyKind = null; dg.state = 'lurk'; dg.timer = 1;
+            } else {
+              dg.x = dnx; dg.y = dny;
+            }
+          }
+        }
+      } else {
+        // lurking: lazy circling over the crater, tasting the air for dinner
+        dg.timer -= dt;
+        dg.scanT -= dt;
+        if (dg.scanT <= 0) {
+          dg.scanT = 0.25;
+          var dcatch = nearestDragonPrey(dg, 260);
+          if (dcatch) {
+            dg.prey = dcatch.ref; dg.preyKind = dcatch.kind;
+            dg.state = 'hunt';
+          }
+        }
+        if (dg.state === 'lurk') {
+          if (dg.timer <= 0) {
+            // drift to another spot over the volcano
+            dg.timer = 3 + Math.random() * 4;
+            var dva = Math.random() * Math.PI * 2;
+            var dvd = 60 + Math.random() * 120;
+            dg.tx = volcCx + Math.cos(dva) * dvd;
+            dg.ty = volcCy + Math.sin(dva) * dvd;
+          }
+          var dwant = Math.atan2(dg.ty - dg.y, dg.tx - dg.x);
+          var ddw = dwant - dg.heading;
+          while (ddw > Math.PI) ddw -= Math.PI * 2;
+          while (ddw < -Math.PI) ddw += Math.PI * 2;
+          dg.heading += Math.max(-1, Math.min(1, ddw)) * 1.5 * dt + Math.sin(dg.flap * 0.4) * 0.2 * dt;
+          var dnx2 = dg.x + Math.cos(dg.heading) * dg.speed * dt;
+          var dny2 = dg.y + Math.sin(dg.heading) * dg.speed * dt;
+          var dtx2 = Math.floor(dnx2 / TILE), dty2 = Math.floor(dny2 / TILE);
+          if (!inBounds(dtx2, dty2) || !volc[idx(dtx2, dty2)]) {
+            // edge of the volcano: bank back toward the crater middle
+            dg.heading = Math.atan2(volcCy - dg.y, volcCx - dg.x);
+            dnx2 = dg.x + Math.cos(dg.heading) * dg.speed * dt;
+            dny2 = dg.y + Math.sin(dg.heading) * dg.speed * dt;
+          }
+          if (dnx2 < 8) dnx2 = 8; else if (dnx2 > WORLD_PX - 8) dnx2 = WORLD_PX - 8;
+          if (dny2 < 8) dny2 = 8; else if (dny2 > WORLD_PY - 8) dny2 = WORLD_PY - 8;
+          dg.x = dnx2; dg.y = dny2;
+        }
+      }
+    }
   }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
 }
@@ -9411,6 +9763,185 @@ function drawEagle(eg) {
   }
   ctx.restore();
 }
+// Optional dragon picture: drop a dragon.png next to world.html and the
+// game uses it instead of the built-in drawing (transparent PNG facing
+// right works best). Until it loads, the canvas dragon shows.
+var dragonImg = null, dragonImgOk = false;
+if (typeof Image !== 'undefined') {
+  dragonImg = new Image();
+  dragonImg.onload = function () { dragonImgOk = true; };
+  dragonImg.src = 'dragon.png';
+}
+function drawDragon(dr) {
+  // Massive volcano dragon: uses dragon.png if you put one next to
+  // world.html (transparent PNG facing right works best), otherwise the
+  // built-in canvas drawing below.
+  var sc = dr.sc;
+  if (dragonImgOk) {
+    ctx.save();
+    ctx.translate(dr.x, dr.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(-8 * sc, 5 * sc, 20 * sc, 9 * sc, 0, 0, 7); ctx.fill();
+    // your picture faces downward, the game faces right: correct by -90°
+    ctx.rotate(dr.heading - Math.PI / 2);
+    var S = sc * 26;
+    var dw = S, dh = S * dragonImg.height / dragonImg.width;
+    ctx.drawImage(dragonImg, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+    return;
+  }
+  var wing = Math.sin(dr.flap); // -1 tucked .. +1 raised
+  var spread = dr.state === 'hunt' ? 1 : 0.25 + 0.1 * wing; // wings open to hunt
+  ctx.save();
+  ctx.translate(dr.x, dr.y);
+  // huge ground shadow, offset behind
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(-8 * sc, 5 * sc, 20 * sc, 9 * sc, 0, 0, 7); ctx.fill();
+  ctx.rotate(dr.heading);
+  var lift = wing * 2 * sc;
+  for (var side = -1; side <= 1; side += 2) {
+    // vast bat wing: black arm bone out, bright orange membrane scalloped
+    // between the fingers
+    var wx = -1 * sc, wy = side * (7 * sc + lift * 0.4);
+    var span = (10 + 14 * spread) * sc;
+    ctx.strokeStyle = '#1f1f24';
+    ctx.lineWidth = 2.2 * sc;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(2 * sc, side * 3 * sc);
+    ctx.lineTo(wx, wy);
+    ctx.lineTo(wx - 4 * sc, wy + side * span * 0.55);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    // membrane: leading edge out to the tip, scalloped trailing edge home
+    var tipX = wx - (10 + 6 * spread) * sc, tipY = wy + side * span;
+    var notchX = wx - 2 * sc, notchY = wy + side * 2 * sc;
+    var mid1X = wx - (7 + 4 * spread) * sc, mid1Y = wy + side * span * 0.66;
+    var mid2X = wx - (4 + 2 * spread) * sc, mid2Y = wy + side * span * 0.33;
+    ctx.fillStyle = '#e8641e';
+    ctx.beginPath();
+    ctx.moveTo(2 * sc, side * 3 * sc);
+    ctx.lineTo(wx, wy);
+    ctx.lineTo(tipX, tipY);
+    ctx.quadraticCurveTo(mid1X + 2 * sc, mid1Y - side * 3 * sc, mid1X, mid1Y);
+    ctx.quadraticCurveTo(mid2X + 2 * sc, mid2Y - side * 3 * sc, mid2X, mid2Y);
+    ctx.quadraticCurveTo(notchX + 1.5 * sc, notchY - side * 2 * sc, notchX, notchY);
+    ctx.closePath(); ctx.fill();
+    // dark finger bones fanning through the membrane
+    ctx.strokeStyle = 'rgba(25,18,18,0.85)';
+    ctx.lineWidth = 1.2 * sc;
+    var bonePts = [[mid2X, mid2Y], [mid1X, mid1Y], [tipX, tipY]];
+    for (var fb = 0; fb < bonePts.length; fb++) {
+      ctx.beginPath();
+      ctx.moveTo(wx - 1 * sc, wy + side * 1 * sc);
+      ctx.lineTo(bonePts[fb][0], bonePts[fb][1]);
+      ctx.stroke();
+    }
+  }
+  // long barbed tail, curling lazily (tighter coil while lurking)
+  var curl = dr.state === 'hunt' ? 0.25 : 1;
+  ctx.strokeStyle = '#232228';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 3 * sc;
+  ctx.beginPath();
+  var tx0 = -9 * sc, ty0 = 0;
+  ctx.moveTo(tx0, ty0);
+  var segs = 6;
+  for (var sg = 1; sg <= segs; sg++) {
+    var sa = sg / segs;
+    var px = tx0 - sa * 16 * sc;
+    var py = Math.sin(sa * (2 + curl * 4) + dr.flap * 0.5) * (2 + curl * 5) * sc;
+    ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+  // tail barb
+  var bbx = tx0 - 16 * sc, bby = Math.sin(2 + curl * 4 + dr.flap * 0.5) * (2 + curl * 5) * sc;
+  ctx.fillStyle = '#1f1f24';
+  ctx.beginPath();
+  ctx.moveTo(bbx + 2 * sc, bby);
+  ctx.lineTo(bbx - 3 * sc, bby - 2.2 * sc);
+  ctx.lineTo(bbx - 3 * sc, bby + 2.2 * sc);
+  ctx.closePath(); ctx.fill();
+  // heavy near-black body with plated dark belly
+  ctx.fillStyle = '#26262c';
+  ctx.beginPath(); ctx.ellipse(0, 0, 11 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#3d3d46';
+  ctx.beginPath(); ctx.ellipse(1 * sc, 0.8 * sc, 8 * sc, 3.4 * sc, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#1c1c22';
+  ctx.lineWidth = 1 * sc;
+  for (var bp = -2; bp <= 2; bp++) {
+    ctx.beginPath();
+    ctx.moveTo((bp * 3 - 1) * sc, -2.2 * sc);
+    ctx.quadraticCurveTo(bp * 3 * sc, 0, (bp * 3 - 1) * sc, 2.8 * sc);
+    ctx.stroke();
+  }
+  // spine spikes + throat bulge while gulping
+  ctx.fillStyle = '#151517';
+  for (var sp = 0; sp < 5; sp++) {
+    var spx = (-6 + sp * 3) * sc;
+    ctx.beginPath();
+    ctx.moveTo(spx - 1.2 * sc, -4 * sc); ctx.lineTo(spx, -7 * sc); ctx.lineTo(spx + 1.2 * sc, -4 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(spx - 1.2 * sc, 4 * sc); ctx.lineTo(spx, 7 * sc); ctx.lineTo(spx + 1.2 * sc, 4 * sc);
+    ctx.closePath(); ctx.fill();
+  }
+  if (dr.state === 'gulp') {
+    var dgp = Math.max(0, dr.gulpT / 2.5);
+    ctx.fillStyle = '#26262c';
+    ctx.beginPath(); ctx.arc(6 * sc, 0, (2 + dgp * 2.5) * sc, 0, 7); ctx.fill();
+  }
+  // black horned head with a toothy maw and huge glossy eyes
+  ctx.fillStyle = '#26262c';
+  ctx.beginPath(); ctx.ellipse(11 * sc, 0, 5 * sc, 4 * sc, 0, 0, 7); ctx.fill();
+  // spiky frill fanning around the back of the head
+  ctx.fillStyle = '#1c1c21';
+  for (var fr = -2; fr <= 2; fr++) {
+    var fra = fr * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(7.5 * sc + Math.cos(fra) * 3 * sc, Math.sin(fra) * 4.5 * sc);
+    ctx.lineTo(7.5 * sc + Math.cos(fra) * 7 * sc, Math.sin(fra) * 7.5 * sc);
+    ctx.lineTo(7.5 * sc + Math.cos(fra + 0.25) * 3 * sc, Math.sin(fra + 0.25) * 4.5 * sc);
+    ctx.closePath(); ctx.fill();
+  }
+  // swept-back horns
+  ctx.fillStyle = '#3a3a42';
+  for (var hn = -1; hn <= 1; hn += 2) {
+    ctx.beginPath();
+    ctx.moveTo(9 * sc, hn * 2.5 * sc);
+    ctx.lineTo(3.5 * sc, hn * 5.5 * sc);
+    ctx.lineTo(8 * sc, hn * 1.2 * sc);
+    ctx.closePath(); ctx.fill();
+  }
+  // open jaw lined with fangs
+  ctx.fillStyle = '#401515';
+  ctx.beginPath();
+  ctx.moveTo(12 * sc, -2.6 * sc); ctx.lineTo(18 * sc, 0); ctx.lineTo(12 * sc, 2.6 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#efe8d8';
+  for (var ft = 0; ft < 3; ft++) {
+    var ftx = (13 + ft * 1.8) * sc;
+    ctx.beginPath();
+    ctx.moveTo(ftx - 0.6 * sc, -2.2 * sc); ctx.lineTo(ftx, -3.4 * sc); ctx.lineTo(ftx + 0.6 * sc, -2.2 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(ftx - 0.6 * sc, 2.2 * sc); ctx.lineTo(ftx, 3.4 * sc); ctx.lineTo(ftx + 0.6 * sc, 2.2 * sc);
+    ctx.closePath(); ctx.fill();
+  }
+  // huge glossy black eyes with white shines, like the reference
+  for (var de = -1; de <= 1; de += 2) {
+    ctx.fillStyle = '#0d0d10';
+    ctx.beginPath(); ctx.arc(12 * sc, de * 2.6 * sc, 1.9 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(12.6 * sc, de * 2.6 * sc - 0.6 * sc, 0.65 * sc, 0, 7); ctx.fill();
+  }
+  // nostril slits
+  ctx.fillStyle = '#1a0d05';
+  ctx.beginPath(); ctx.ellipse(16.5 * sc, -1 * sc, 0.7 * sc, 0.4 * sc, 0.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(16.5 * sc, 1 * sc, 0.7 * sc, 0.4 * sc, -0.3, 0, 7); ctx.fill();
+  ctx.restore();
+}
 function drawSeaTurtle(bt) {
   // At sea: a dark translucent shadow seen through the water. Hauled out on
   // the beach: a full-color realistic turtle (babies always read as shadows).
@@ -9648,19 +10179,23 @@ function render(t, rdt) {
       var v = hash2(x, y, 21) - 0.5;
       if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
       else if (b === WATER) ctx.fillStyle = shade(lava[i] ? C_LAVA : (swp[i] ? C_SWPW : (bigLake[i] ? C_LAKE : C_WATER)), v * 12);
-      else if (b === SAND) ctx.fillStyle = shade(des[i] ? C_DES : C_SAND, v * 14);
+      else if (b === SAND) ctx.fillStyle = shade(volc[i] ? C_BASALT : (des[i] ? C_DES : C_SAND), v * 14);
       else {
-        // grass hugging a pond or lake reads a little darker (2-tile ring)
-        var dg = false, dgMud = false;
-        for (var dgy = -2; dgy <= 2 && !(dg && dgMud); dgy++) {
+        // grass hugging a pond or lake reads a little darker (2-tile ring;
+        // lava doesn't count — its shores stay bare stone)
+        var dg = false, dgMud = false, dgLava = false;
+        for (var dgy = -2; dgy <= 2 && !(dg && dgMud && dgLava); dgy++) {
           for (var dgx = -2; dgx <= 2; dgx++) {
             if (!dgx && !dgy) continue;
             var dxx = x + dgx, dyy = y + dgy;
             if (dxx < 0 || dyy < 0 || dxx >= W || dyy >= H) continue;
             if (biome[idx(dxx, dyy)] === WATER) {
-              dg = true;
-              if (mud[idx(dxx, dyy)]) dgMud = true;
-              break;
+              if (lava[idx(dxx, dyy)]) dgLava = true;
+              else {
+                dg = true;
+                if (mud[idx(dxx, dyy)]) dgMud = true;
+                break;
+              }
             }
           }
         }
@@ -9821,7 +10356,7 @@ function render(t, rdt) {
             ctx.beginPath(); ctx.ellipse(lgx + 4, lgy + 1, 7, 3, 0, 0, 7); ctx.fill();
           }
         } else {
-        if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i] && !acacias[i] && !deadB[i] && !volc[i]) {
+        if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i] && !acacias[i] && !deadB[i] && !volc[i] && !dgLava) {
           ctx.strokeStyle = sav[i] ? 'rgba(150,125,70,0.8)' : 'rgba(20,90,40,0.7)';
           ctx.lineWidth = 2;
           var gx = sx + 6 + hash2(x, y, 25) * 20;
@@ -10453,6 +10988,13 @@ function render(t, rdt) {
     var eg2 = eagles[egi2];
     if (eg2.x < cam.x - 100 || eg2.x > cam.x + viewW + 100 || eg2.y < cam.y - 100 || eg2.y > cam.y + viewH + 100) continue;
     drawEagle(eg2);
+  }
+  // The volcano dragon looms over everything below it.
+  if (dragon) {
+    var dg2 = dragon;
+    if (!(dg2.x < cam.x - 200 || dg2.x > cam.x + viewW + 200 || dg2.y < cam.y - 200 || dg2.y > cam.y + viewH + 200)) {
+      drawDragon(dg2);
+    }
   }
 
   // Screen-space UI (joystick, minimap)
