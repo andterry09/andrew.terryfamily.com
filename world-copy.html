@@ -1,0 +1,3295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Open World</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0b1020;
+    font-family: 'Segoe UI', sans-serif;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(13, 19, 27, 0.93);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    pointer-events: none;
+  }
+  #hud .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
+  #hidden-badge {
+    display: none;
+    position: fixed;
+    top: 184px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(13, 19, 27, 0.93);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    pointer-events: none;
+  }
+  #help {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(13, 19, 27, 0.93);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="title">🌍 Open World</div>
+  <div id="coords">x: 0, y: 0</div>
+  <div id="berries">🫐 Berries: 0</div>
+  <div id="shrooms">🍄 Mushrooms: 0</div>
+</div>
+<div id="hidden-badge">🤫 Hidden!</div>
+<div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
+<script>
+'use strict';
+// ---------- Config ----------
+var TILE = 32;
+var ZOOM = 1.6; // zoomed-in camera (map layout unchanged)
+var W = 240, H = 240;               // decently big, but NOT infinite
+var WORLD_PX = W * TILE, WORLD_PY = H * TILE;
+var WATER_LEVEL = 0.30;
+var SAND_LINE = 0.345;
+
+// Biome ids
+var OCEAN = 0, WATER = 1, SAND = 2, GRASS = 3;
+
+// ---------- Deterministic hashing / RNG ----------
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash2(x, y, s) {
+  var h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1442695041)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967295;
+}
+
+// ---------- Value noise ----------
+var lat = new Float32Array(256);
+var perm = new Uint8Array(512);
+function seedNoise(rand) {
+  var p = [];
+  for (var i = 0; i < 256; i++) { p[i] = i; lat[i] = rand(); }
+  for (var j = 255; j > 0; j--) {
+    var k = (rand() * (j + 1)) | 0;
+    var tmp = p[j]; p[j] = p[k]; p[k] = tmp;
+  }
+  for (var m = 0; m < 512; m++) perm[m] = p[m & 255];
+}
+function vnoise(x, y) {
+  var xi = Math.floor(x), yi = Math.floor(y);
+  var xf = x - xi, yf = y - yi;
+  var X = xi & 255, Y = yi & 255;
+  var v00 = lat[perm[(perm[X] + Y) & 511] & 255];
+  var v10 = lat[perm[(perm[(X + 1) & 255] + Y) & 511] & 255];
+  var v01 = lat[perm[(perm[X] + Y + 1) & 511] & 255];
+  var v11 = lat[perm[(perm[(X + 1) & 255] + Y + 1) & 511] & 255];
+  var u = xf * xf * (3 - 2 * xf);
+  var v = yf * yf * (3 - 2 * yf);
+  return (v00 * (1 - u) + v10 * u) * (1 - v) + (v01 * (1 - u) + v11 * u) * v;
+}
+function fbm(x, y, oct) {
+  var sum = 0, amp = 0.5, f = 1, norm = 0;
+  for (var i = 0; i < oct; i++) {
+    sum += amp * vnoise(x * f, y * f);
+    norm += amp;
+    amp *= 0.5;
+    f *= 2.03;
+  }
+  return sum / norm;
+}
+
+// ---------- World data ----------
+var elev = new Float32Array(W * H);
+var biome = new Uint8Array(W * H);   // OCEAN/WATER/SAND/GRASS
+var bigLake = new Uint8Array(W * H); // 1 on big-lake water (mid-tone color)
+var trees = new Uint8Array(W * H);
+var pines = new Uint8Array(W * H); // snowy pine trees in the top-left snow area
+var snow = new Uint8Array(W * H); // 1 on snowy land (top-left, grass only)
+var ice = new Uint8Array(W * H); // 1 on frozen pond water near the snow
+var palms = new Uint8Array(W * H); // coconut palms on ocean beaches + islands
+var bushes = new Uint8Array(W * H);
+var solid = new Uint8Array(W * H);
+var berryN = new Uint8Array(W * H);   // berries currently on a bush (0-3)
+var berryT = new Float32Array(W * H); // regrow timer per bush
+var litter = new Uint8Array(W * H); // forest floor: 0 none, 1 leaf, 2 leaf, 3 stick
+var stumps = new Uint8Array(W * H); // rare old stumps
+var shells = new Uint8Array(W * H); // shells on ocean beaches: 0 none, 1 pink, 2 white, 3 purple
+var crabHoles = []; // beach crab holes: {x,y,state,timer,cx,cy,tx,ty,pause,heading}
+var burrows = []; // bunny burrows in the fields: {x,y,breedT}
+var bunnies = []; // field bunnies: {x,y,heading,state,timer,resting,tx,ty,btx,bty,sc,gsc,tone,dark,home,bx,by,baby,age,lifespan,deathT,fade,nibT,craveT,homeT}
+var fishes = []; // pond + ocean fish: {x,y,heading,speed,turn,sea}
+var ducks = []; // pond ducks: {x,y,heading,speed,turn,state,timer,tx,ty,lwX,lwY,sc,body,head,drake,wake,age,lifespan,nester,nest,layT,deathT,fade,chick,gsc,nx,ny,phase,carry}
+var nests = []; // duck nests on shores: {x,y,eggs:[age],clutch,age,mom}
+var duckSpots = []; // open pond-water tiles where newcomer ducks paddle in
+var DUCK_TONES = [ [ '#8a6f4d', '#6e5739' ], [ '#9aa0a6', '#7c8288' ], [ '#6b5b45', '#52452f' ] ]; // body + head shades
+var splashes = []; // wading ripples: {x,y,age,life,maxR}
+var noBush = new Uint8Array(W * H); // keep bushes clear of logs/stumps
+var open = new Uint8Array(W * H); // open field: grass with no trees nearby
+var mushN = new Uint8Array(W * H); // mushrooms on a stump (0-3)
+var mushT = new Float32Array(W * H); // mushroom regrow timer
+var mushScore = 0;
+var seed = 20260906;
+var score = 0, eatCd = 0, splashT = 0, duckCheckT = 0, bunCheckT = 0;
+var playerA = 1, wasHiding = false;
+var iceVx = 0, iceVy = 0; // skating momentum while sliding on ice
+var treeA = new Float32Array(W * H).fill(1); // canopy fade per tree
+var pineA = new Float32Array(W * H).fill(1); // canopy fade per pine
+var pineTrunkA = new Float32Array(W * H); // trunk shows only when under the pine
+var palmA = new Float32Array(W * H).fill(1); // frond fade per palm
+var palmTrunkA = new Float32Array(W * H); // trunk ring shows only when under the palm
+var trunkA = new Float32Array(W * H); // trunk shows only when under the tree
+var bushA = new Float32Array(W * H).fill(1); // bush fade when inside one
+
+function idx(x, y) { return y * W + x; }
+function inBounds(x, y) { return x >= 0 && y >= 0 && x < W && y < H; }
+
+function generate(s) {
+  seed = s;
+  var rand = mulberry32(seed);
+  seedNoise(rand);
+  var x, y;
+
+  // Elevation with island falloff (ocean at the edges)
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var base = fbm(x * 0.014, y * 0.014, 4);
+      base += 0.15 * fbm(x * 0.06 + 40, y * 0.06 + 40, 2);
+      var dx = (x - W / 2) / (W / 2);
+      var dy = (y - H / 2) / (H / 2);
+      var d = Math.sqrt(dx * dx + dy * dy) / Math.SQRT2;
+      var elevV = base + 0.06 - Math.pow(d, 2.1) * 0.72;
+      // Northern sea: dip the far north below the waves so the island sits
+      // off the top frame. Its reach varies along x, so the new coast is a
+      // curvy shoreline with bays and points instead of a straight cut.
+      var northR = 26 + 30 * fbm(x * 0.02 + 7.3, 3.1, 3);
+      if (y < northR) {
+        var nt = 1 - y / northR;
+        elevV -= 0.34 * nt * nt;
+      }
+      elev[idx(x, y)] = elevV;
+    }
+  }
+
+  // Base water vs land
+  for (var i = 0; i < W * H; i++) {
+    biome[i] = elev[i] < WATER_LEVEL ? WATER : GRASS;
+  }
+
+  // (No rivers — lakes and ocean only)
+
+  // Ocean = water connected to the map border (flood fill); inland water stays lakes
+  var stack = [];
+  for (x = 0; x < W; x++) { stack.push([x, 0]); stack.push([x, H - 1]); }
+  for (y = 0; y < H; y++) { stack.push([0, y]); stack.push([W - 1, y]); }
+  while (stack.length) {
+    var c = stack.pop();
+    var qx2 = c[0], qy2 = c[1];
+    if (!inBounds(qx2, qy2)) continue;
+    var ii = idx(qx2, qy2);
+    if (biome[ii] !== WATER || solid[ii] === 2) continue;
+    biome[ii] = OCEAN;
+    solid[ii] = 2; // visited marker reused below
+    stack.push([qx2 + 1, qy2]); stack.push([qx2 - 1, qy2]);
+    stack.push([qx2, qy2 + 1]); stack.push([qx2, qy2 - 1]);
+  }
+
+  // Connect all ocean parts so the ocean is a single connected body.
+  // Land bridges to the edge can split border water into separate OCEAN
+  // patches — carve a winding, valley-following strait between them so the
+  // new shoreline looks like a drowned river valley, not a straight canal.
+  (function connectOceans() {
+    function labelComps() {
+      var comp = new Int32Array(W * H).fill(-1);
+      var sizes = [];
+      var n = 0;
+      var d4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var ly = 0; ly < H; ly++) {
+        for (var lx = 0; lx < W; lx++) {
+          var li0 = idx(lx, ly);
+          if (biome[li0] !== OCEAN || comp[li0] !== -1) continue;
+          var q2 = [[lx, ly]];
+          comp[li0] = n;
+          var sz = 0;
+          while (q2.length) {
+            var cc = q2.pop();
+            sz++;
+            for (var k = 0; k < 4; k++) {
+              var nnx = cc[0] + d4[k][0], nny = cc[1] + d4[k][1];
+              if (!inBounds(nnx, nny)) continue;
+              var nni = idx(nnx, nny);
+              if (biome[nni] !== OCEAN || comp[nni] !== -1) continue;
+              comp[nni] = n;
+              q2.push([nnx, nny]);
+            }
+          }
+          sizes.push(sz);
+          n++;
+        }
+      }
+      return { comp: comp, sizes: sizes, count: n };
+    }
+    // Cost of routing the strait through a tile, as an integer: cheap through
+    // existing water, cheaper through low shore-side land (natural valleys),
+    // wobbly via noise, and pricey right at the map rim so channels dive
+    // inland instead of paving a straight wall along the border.
+    function crossCost(tx, ty) {
+      var i6 = idx(tx, ty);
+      var b6 = biome[i6];
+      if (b6 === OCEAN || b6 === WATER) return 400;
+      var c6 = 1000 + Math.round(Math.max(0, elev[i6] - WATER_LEVEL) * 9000);
+      c6 += Math.round(hash2(tx, ty, seed + 803) * 2000);
+      var ed = tx < ty ? tx : ty;
+      var ed2 = (W - 1 - tx) < (H - 1 - ty) ? (W - 1 - tx) : (H - 1 - ty);
+      if (ed2 < ed) ed = ed2;
+      if (ed < 6) c6 += (6 - ed) * 1500;
+      return c6;
+    }
+    for (var iter = 0; iter < 10; iter++) {
+      var L = labelComps();
+      if (L.count <= 1) break;
+      var main = 0;
+      for (var ci = 1; ci < L.count; ci++) if (L.sizes[ci] > L.sizes[main]) main = ci;
+      var target = -1;
+      for (var cj = 0; cj < L.count; cj++) {
+        if (cj === main) continue;
+        if (target === -1 || L.sizes[cj] > L.sizes[target]) target = cj;
+      }
+      // Dijkstra from every main-ocean tile to the nearest target tile
+      // (settled set: each tile routes once, so this always finishes fast)
+      var dist = new Float64Array(W * H).fill(Infinity);
+      var prev = new Int32Array(W * H).fill(-1);
+      var settled = new Uint8Array(W * H);
+      var heapN = [], heapD = [];
+      function hLess(d1, n1, d2, n2) { return d1 < d2 || (d1 === d2 && n1 < n2); }
+      function hPush(nd, nn) {
+        heapD.push(nd); heapN.push(nn);
+        var i = heapD.length - 1;
+        while (i > 0) {
+          var pp = (i - 1) >> 1;
+          if (hLess(heapD[i], heapN[i], heapD[pp], heapN[pp])) {
+            var td = heapD[i]; heapD[i] = heapD[pp]; heapD[pp] = td;
+            var tn = heapN[i]; heapN[i] = heapN[pp]; heapN[pp] = tn;
+            i = pp;
+          } else break;
+        }
+      }
+      function hPop() {
+        var top = heapN[0];
+        var lastD = heapD.pop(), lastN = heapN.pop();
+        if (heapD.length) {
+          heapD[0] = lastD; heapN[0] = lastN;
+          var i = 0;
+          for (;;) {
+            var l = i * 2 + 1, r = l + 1, m = i;
+            if (l < heapD.length && hLess(heapD[l], heapN[l], heapD[m], heapN[m])) m = l;
+            if (r < heapD.length && hLess(heapD[r], heapN[r], heapD[m], heapN[m])) m = r;
+            if (m === i) break;
+            var td = heapD[i]; heapD[i] = heapD[m]; heapD[m] = td;
+            var tn = heapN[i]; heapN[i] = heapN[m]; heapN[m] = tn;
+            i = m;
+          }
+        }
+        return top;
+      }
+      for (var bi = 0; bi < W * H; bi++) {
+        if (L.comp[bi] === main) { dist[bi] = 0; prev[bi] = bi; hPush(0, bi); }
+      }
+      var found = -1;
+      while (heapD.length) {
+        var cur = hPop();
+        if (settled[cur]) continue;
+        settled[cur] = 1;
+        if (L.comp[cur] === target) { found = cur; break; }
+        var cx0 = cur % W, cy0 = (cur / W) | 0;
+        var cd = dist[cur];
+        var nbs = [[cx0 + 1, cy0], [cx0 - 1, cy0], [cx0, cy0 + 1], [cx0, cy0 - 1]];
+        for (var dd0 = 0; dd0 < 4; dd0++) {
+          var ax = nbs[dd0][0], ay = nbs[dd0][1];
+          if (!inBounds(ax, ay)) continue;
+          var ai = idx(ax, ay);
+          if (settled[ai]) continue;
+          var nd = cd + crossCost(ax, ay);
+          if (nd < dist[ai]) { dist[ai] = nd; prev[ai] = cur; hPush(nd, ai); }
+        }
+      }
+      if (found === -1) break;
+      // Collect the route, then carve it with a varying width and wobbly
+      // banks. The center line is always carved so the strait stays joined.
+      var path = [];
+      var pp0 = found, pg = 0;
+      while (pp0 !== -1 && pg++ < W * H) {
+        path.push(pp0);
+        if (L.comp[pp0] === main) break;
+        pp0 = prev[pp0];
+      }
+      for (var s = 0; s < path.length; s++) {
+        var p = path[s];
+        var pxx = p % W, pyy = (p / W) | 0;
+        var wide = hash2(pxx, pyy, seed + 804) < 0.35;
+        var cells = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]];
+        // Wide bulges reach two tiles out, but only over a bridge tile that
+        // is ocean (just carved or already) — never strand a lone speck.
+        if (wide) cells.push([2, 0, 1, 0], [-2, 0, -1, 0], [0, 2, 0, 1], [0, -2, 0, -1]);
+        for (var c3 = 0; c3 < cells.length; c3++) {
+          var ox = cells[c3][0], oy = cells[c3][1];
+          var center = (ox === 0 && oy === 0);
+          var ex = pxx + ox, ey = pyy + oy;
+          if (!inBounds(ex, ey)) continue;
+          if (cells[c3].length > 2) {
+            var bx = pxx + cells[c3][2], by = pyy + cells[c3][3];
+            if (!inBounds(bx, by) || biome[idx(bx, by)] !== OCEAN) continue;
+          }
+          if (!center) {
+            var far = (Math.abs(ox) === 2 || Math.abs(oy) === 2);
+            if (hash2(ex, ey, seed + 801) < (far ? 0.5 : 0.3)) continue;
+          }
+          var ei = idx(ex, ey);
+          if (biome[ei] !== OCEAN) {
+            biome[ei] = OCEAN;
+            elev[ei] = WATER_LEVEL - 0.05 - hash2(ex, ey, seed + 802) * 0.05;
+          }
+        }
+      }
+    }
+    // Any lakes now touching the (single) ocean become part of it
+    var ab = [];
+    for (var abi = 0; abi < W * H; abi++) if (biome[abi] === OCEAN) ab.push(abi);
+    while (ab.length) {
+      var ci2 = ab.pop();
+      var gx0 = ci2 % W, gy0 = (ci2 / W) | 0;
+      var dd = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var qd = 0; qd < 4; qd++) {
+        var hx = gx0 + dd[qd][0], hy = gy0 + dd[qd][1];
+        if (!inBounds(hx, hy)) continue;
+        var hi = idx(hx, hy);
+        if (biome[hi] === WATER) { biome[hi] = OCEAN; ab.push(hi); }
+      }
+    }
+  })();
+
+  // Remove tiny odd ponds (keep real lakes and ocean)
+  var seen = new Uint8Array(W * H);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var li = idx(x, y);
+      if (biome[li] !== WATER || seen[li]) continue;
+      var region = [];
+      var q = [[x, y]];
+      seen[li] = 1;
+      while (q.length) {
+        var c = q.pop();
+        region.push(c);
+        var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (var di = 0; di < 4; di++) {
+          var nx = c[0] + dirs[di][0], ny = c[1] + dirs[di][1];
+          if (!inBounds(nx, ny)) continue;
+          var ni = idx(nx, ny);
+          if (biome[ni] !== WATER || seen[ni]) continue;
+          seen[ni] = 1;
+          q.push([nx, ny]);
+        }
+      }
+      if (region.length < 25) {
+        for (var ri = 0; ri < region.length; ri++) {
+          var gi = idx(region[ri][0], region[ri][1]);
+          biome[gi] = GRASS; // fill tiny odd ponds with grass, not sand
+        }
+      }
+    }
+  }
+
+  // Ponds: scatter small inland ponds (grass runs straight to the water)
+  var pondsWanted = 14, pondTries = 0;
+  while (pondsWanted > 0 && pondTries < 400) {
+    pondTries++;
+    var ppx = 25 + ((rand() * (W - 50)) | 0);
+    var ppy = 25 + ((rand() * (H - 50)) | 0);
+    var ppi = idx(ppx, ppy);
+    if (biome[ppi] !== GRASS) continue;
+    var pdcx = ppx - (W >> 1), pdcy = ppy - (H >> 1);
+    if (pdcx * pdcx + pdcy * pdcy < 100) continue; // keep spawn clearing open
+    // keep ponds well clear of the ocean (sand is drawn later near ocean,
+    // so this keeps ponds off sand too)
+    var pdClear = true;
+    for (var pcy = ppy - 12; pcy <= ppy + 12 && pdClear; pcy++) {
+      for (var pcx = ppx - 12; pcx <= ppx + 12; pcx++) {
+        if (!inBounds(pcx, pcy)) continue;
+        if (biome[idx(pcx, pcy)] === OCEAN) { pdClear = false; break; }
+      }
+    }
+    if (!pdClear) continue;
+    var pdr = 2 + rand() * 2.5; // 2 - 4.5 tile radius with a wobbly edge
+    for (var pdy = Math.floor(ppy - pdr - 1); pdy <= Math.ceil(ppy + pdr + 1); pdy++) {
+      for (var pdx = Math.floor(ppx - pdr - 1); pdx <= Math.ceil(ppx + pdr + 1); pdx++) {
+        if (!inBounds(pdx, pdy)) continue;
+        var pdpi = idx(pdx, pdy);
+        if (biome[pdpi] !== GRASS) continue;
+        var pddx = pdx - ppx, pddy = pdy - ppy;
+        var pdd = Math.sqrt(pddx * pddx + pddy * pddy);
+        var pdfuzz = (hash2(pdx, pdy, seed + 401) - 0.5) * 1.6;
+        if (pdd < pdr + pdfuzz) {
+          biome[pdpi] = WATER;
+          elev[pdpi] = WATER_LEVEL - 0.05 - hash2(pdx, pdy, seed + 402) * 0.05;
+        }
+      }
+    }
+    pondsWanted--;
+  }
+
+  // Big lake at the requested spot (ponds may merge into it)
+  var blx = 130, bly = 200, blr = 13;
+  bigLake.fill(0);
+  for (var blyy = Math.floor(bly - blr - 2); blyy <= Math.ceil(bly + blr + 2); blyy++) {
+    for (var blxx = Math.floor(blx - blr - 2); blxx <= Math.ceil(blx + blr + 2); blxx++) {
+      if (!inBounds(blxx, blyy)) continue;
+      var blpi = idx(blxx, blyy);
+      if (biome[blpi] === OCEAN) continue;
+      var bldx = (blxx - blx) * 0.8, bldy = (blyy - bly) * 1.15;
+      var bldd = Math.sqrt(bldx * bldx + bldy * bldy);
+      var blf = 0.65 + 0.7 * fbm(blxx * 0.07 + 900, blyy * 0.07 + 900, 3);
+      if (bldd < blr * blf) {
+        biome[blpi] = WATER;
+        bigLake[blpi] = 1;
+        elev[blpi] = WATER_LEVEL - 0.05 - hash2(blxx, blyy, seed + 601) * 0.05;
+      }
+    }
+  }
+
+  // Ponds stay connected: a lone WATER tile touching no other WATER tile
+  // (4 sides, like every other flood fill here) is filled back to grass,
+  // so every pond tile touches at least one other pond tile.
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var lone = idx(x, y);
+      if (biome[lone] !== WATER) continue;
+      if ((x + 1 < W && biome[lone + 1] === WATER) ||
+          (x - 1 >= 0 && biome[lone - 1] === WATER) ||
+          (y + 1 < H && biome[lone + W] === WATER) ||
+          (y - 1 >= 0 && biome[lone - W] === WATER)) continue;
+      biome[lone] = GRASS;
+      bigLake[lone] = 0;
+      elev[lone] = WATER_LEVEL + 0.02;
+    }
+  }
+
+  // Spawn: nearest grass to center
+  var spawn = { x: W >> 1, y: H >> 1 };
+  outer:
+  for (var rad = 0; rad < W; rad++) {
+    for (var ay = -rad; ay <= rad; ay++) {
+      for (var ax = -rad; ax <= rad; ax++) {
+        if (Math.max(Math.abs(ax), Math.abs(ay)) !== rad) continue;
+        var gx = (W >> 1) + ax, gy = (H >> 1) + ay;
+        if (inBounds(gx, gy) && biome[idx(gx, gy)] === GRASS) {
+          spawn = { x: gx, y: gy };
+          break outer;
+        }
+      }
+    }
+  }
+
+  // Sand only by the ocean, plus a little patchy sand around the big lake.
+  // Ponds get no sand — grass runs straight to their water.
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i2 = idx(x, y);
+      if (biome[i2] !== GRASS) continue;
+      var nearOcean = false;
+      for (var wy = -2; wy <= 2 && !nearOcean; wy++) {
+        for (var wx = -2; wx <= 2; wx++) {
+          if (!wx && !wy) continue;
+          var vx = x + wx, vy = y + wy;
+          if (!inBounds(vx, vy)) continue;
+          if (biome[idx(vx, vy)] === OCEAN) { nearOcean = true; break; }
+        }
+      }
+      var nearBig = false;
+      for (var lky = -1; lky <= 1 && !nearBig; lky++) {
+        for (var lkx = -1; lkx <= 1; lkx++) {
+          if (!lkx && !lky) continue;
+          var lqx = x + lkx, lqy = y + lky;
+          if (!inBounds(lqx, lqy)) continue;
+          if (bigLake[idx(lqx, lqy)]) { nearBig = true; break; }
+        }
+      }
+      if (nearOcean) { biome[i2] = SAND; continue; }
+      if (nearBig) {
+        // a little patchy sand around the big lake only (ponds stay grassy)
+        if (hash2(x, y, seed + 701) < 0.35) biome[i2] = SAND;
+        continue;
+      }
+      // low coastal flat just behind the beach stays sand, but only
+      // if the ocean is within 4 tiles — inland low spots stay grass
+      if (elev[i2] < SAND_LINE) {
+        var coast = false;
+        for (var cy2 = -4; cy2 <= 4 && !coast; cy2++) {
+          for (var cx2 = -4; cx2 <= 4; cx2++) {
+            if (!cx2 && !cy2) continue;
+            var qx3 = x + cx2, qy3 = y + cy2;
+            if (!inBounds(qx3, qy3)) continue;
+            if (biome[idx(qx3, qy3)] === OCEAN) { coast = true; break; }
+          }
+        }
+        if (coast) biome[i2] = SAND;
+      }
+    }
+  }
+
+  // Break narrow sandy passes between two oceans so islands can form:
+  // a SAND tile with ocean close on opposite sides becomes ocean.
+  // Uses a snapshot so carving can't chain-react down a whole coastline.
+  var oceanMask = new Uint8Array(W * H);
+  for (var om = 0; om < W * H; om++) if (biome[om] === OCEAN) oceanMask[om] = 1;
+  function oceanAt(ax, ay) { return inBounds(ax, ay) && oceanMask[idx(ax, ay)] === 1; }
+  function oceanNear2(ax, ay, dx, dy) {
+    return oceanAt(ax + dx, ay + dy) || oceanAt(ax + dx * 2, ay + dy * 2);
+  }
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var pq = idx(x, y);
+      if (biome[pq] !== SAND) continue;
+      if ((oceanNear2(x, y, 0, -1) && oceanNear2(x, y, 0, 1)) ||
+          (oceanNear2(x, y, -1, 0) && oceanNear2(x, y, 1, 0))) {
+        biome[pq] = OCEAN;
+        elev[pq] = WATER_LEVEL - 0.05;
+      }
+    }
+  }
+
+  // Keep the ocean a single connected body after the carving above:
+  // absorb lakes now touching the sea, then revert any tiny isolated
+  // ocean specks (a SAND tile with ocean 2 away on both sides can strand
+  // a 1-tile ocean with land in between) back to sand.
+  (function tidyOceans() {
+    var ab2 = [];
+    for (var abi = 0; abi < W * H; abi++) if (biome[abi] === OCEAN) ab2.push(abi);
+    while (ab2.length) {
+      var ci2 = ab2.pop();
+      var gx0 = ci2 % W, gy0 = (ci2 / W) | 0;
+      var dd = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var qd = 0; qd < 4; qd++) {
+        var hx = gx0 + dd[qd][0], hy = gy0 + dd[qd][1];
+        if (!inBounds(hx, hy)) continue;
+        var hi = idx(hx, hy);
+        if (biome[hi] === WATER) { biome[hi] = OCEAN; ab2.push(hi); }
+      }
+    }
+    var comp = new Int32Array(W * H).fill(-1);
+    var sizes = [];
+    var n = 0;
+    var d4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (var ty = 0; ty < H; ty++) {
+      for (var tx = 0; tx < W; tx++) {
+        var ti = idx(tx, ty);
+        if (biome[ti] !== OCEAN || comp[ti] !== -1) continue;
+        var qq = [ti];
+        comp[ti] = n;
+        var sz = 0;
+        while (qq.length) {
+          var cc = qq.pop();
+          sz++;
+          var ccx = cc % W, ccy = (cc / W) | 0;
+          for (var k = 0; k < 4; k++) {
+            var nx = ccx + d4[k][0], ny = ccy + d4[k][1];
+            if (!inBounds(nx, ny)) continue;
+            var ni = idx(nx, ny);
+            if (biome[ni] !== OCEAN || comp[ni] !== -1) continue;
+            comp[ni] = n;
+            qq.push(ni);
+          }
+        }
+        sizes.push(sz);
+        n++;
+      }
+    }
+    if (n <= 1) return;
+    var main = 0;
+    for (var ci = 1; ci < n; ci++) if (sizes[ci] > sizes[main]) main = ci;
+    // Tiny stranded specks (1-tile artifacts from the carve above) go back
+    // to sand; anything big gets a carved channel instead of being nuked.
+    var bigSplit = false;
+    for (var bi2 = 0; bi2 < W * H; bi2++) {
+      if (biome[bi2] === OCEAN && comp[bi2] !== main && sizes[comp[bi2]] < 30) {
+        biome[bi2] = SAND;
+        elev[bi2] = WATER_LEVEL + 0.02;
+        comp[bi2] = main;
+      }
+    }
+    for (var ck = 0; ck < n; ck++) {
+      if (ck !== main && sizes[ck] >= 30) {
+        var probe = -1;
+        for (var pb = 0; pb < W * H; pb++) {
+          if (biome[pb] === OCEAN && comp[pb] === ck) { probe = pb; break; }
+        }
+        if (probe !== -1) bigSplit = true;
+      }
+    }
+    if (!bigSplit) return;
+    // Rare large split survived: carve shortest channel from it to the main ocean.
+    var prev2 = new Int32Array(W * H).fill(-1);
+    var q4 = [];
+    for (var mb = 0; mb < W * H; mb++) if (biome[mb] === OCEAN && comp[mb] === main) { prev2[mb] = mb; q4.push(mb); }
+    var hd = 0, fd = -1;
+    while (hd < q4.length && fd === -1) {
+      var cu = q4[hd++];
+      var ux = cu % W, uy = (cu / W) | 0;
+      var ub = [[ux + 1, uy], [ux - 1, uy], [ux, uy + 1], [ux, uy - 1]];
+      for (var ud = 0; ud < 4; ud++) {
+        var vx = ub[ud][0], vy = ub[ud][1];
+        if (!inBounds(vx, vy)) continue;
+        var vi = idx(vx, vy);
+        if (prev2[vi] !== -1) continue;
+        prev2[vi] = cu;
+        if (biome[vi] === OCEAN && comp[vi] !== main) { fd = vi; break; }
+        q4.push(vi);
+      }
+    }
+    if (fd !== -1) {
+      var pp = fd, gd2 = 0;
+      while (pp !== -1 && gd2++ < W * H) {
+        var pxx = pp % W, pyy = (pp / W) | 0;
+        if (biome[pp] !== OCEAN) {
+          biome[pp] = OCEAN;
+          elev[pp] = WATER_LEVEL - 0.05 - hash2(pxx, pyy, seed + 802) * 0.05;
+        }
+        if (prev2[pp] === pp) break;
+        pp = prev2[pp];
+      }
+    }
+  })();
+
+  // Remove the small islands: every landmass (grass/sand) that isn't the
+  // main island is sunk back into water, leaving a single island. Each sunk
+  // tile takes after its neighbours — sea where it touched the sea, lake
+  // water where it sat in a lake — so lakes with islets stay lakes.
+  // Any lake left open to the sea by this becomes ocean too.
+  (function removeIslands() {
+    function isLand(i) { return biome[i] !== OCEAN && biome[i] !== WATER; }
+    var comp = new Int32Array(W * H).fill(-1);
+    var sizes = [];
+    var n = 0;
+    for (var iy = 0; iy < H; iy++) {
+      for (var ix = 0; ix < W; ix++) {
+        var si = idx(ix, iy);
+        if (!isLand(si) || comp[si] !== -1) continue;
+        var q = [si];
+        comp[si] = n;
+        var sz = 0;
+        while (q.length) {
+          var c = q.pop();
+          sz++;
+          var cx = c % W, cy = (c / W) | 0;
+          if (cx + 1 < W && isLand(c + 1) && comp[c + 1] === -1) { comp[c + 1] = n; q.push(c + 1); }
+          if (cx - 1 >= 0 && isLand(c - 1) && comp[c - 1] === -1) { comp[c - 1] = n; q.push(c - 1); }
+          if (cy + 1 < H && isLand(c + W) && comp[c + W] === -1) { comp[c + W] = n; q.push(c + W); }
+          if (cy - 1 >= 0 && isLand(c - W) && comp[c - W] === -1) { comp[c - W] = n; q.push(c - W); }
+        }
+        sizes.push(sz);
+        n++;
+      }
+    }
+    if (n <= 1) return;
+    var main = 0;
+    for (var ci = 1; ci < n; ci++) if (sizes[ci] > sizes[main]) main = ci;
+    for (var bi = 0; bi < W * H; bi++) {
+      if (comp[bi] === -1 || comp[bi] === main) continue;
+      var bx = bi % W, by = (bi / W) | 0;
+      var touchesSea =
+        (bx + 1 < W && biome[bi + 1] === OCEAN) ||
+        (bx - 1 >= 0 && biome[bi - 1] === OCEAN) ||
+        (by + 1 < H && biome[bi + W] === OCEAN) ||
+        (by - 1 >= 0 && biome[bi - W] === OCEAN);
+      biome[bi] = touchesSea ? OCEAN : WATER;
+      elev[bi] = WATER_LEVEL - 0.05 - hash2(bx, by, seed + 802) * 0.05;
+    }
+    var ab3 = [];
+    for (var abi3 = 0; abi3 < W * H; abi3++) if (biome[abi3] === OCEAN) ab3.push(abi3);
+    while (ab3.length) {
+      var ci3 = ab3.pop();
+      var gx3 = ci3 % W, gy3 = (ci3 / W) | 0;
+      var dd3 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var qd3 = 0; qd3 < 4; qd3++) {
+        var hx3 = gx3 + dd3[qd3][0], hy3 = gy3 + dd3[qd3][1];
+        if (!inBounds(hx3, hy3)) continue;
+        var hi3 = idx(hx3, hy3);
+        if (biome[hi3] === WATER) { biome[hi3] = OCEAN; ab3.push(hi3); }
+      }
+    }
+  })();
+
+  // Sandy islands out in the ocean: every tile is SAND, with open water
+  // between each island and the mainland / map border / other islands.
+  var islandSpots = []; // palm planting uses these centers later
+  (function makeSandyIslands() {
+    var ISLANDS_WANTED = 8;
+    var GAP = 3;        // water tiles kept between island sand and any other land
+    var EDGE_GAP = 2;   // water tiles kept between island sand and the map border
+    var TRIES = 1200;
+    var placed = []; // {x, y, r}
+    var tries = 0;
+    while (placed.length < ISLANDS_WANTED && tries < TRIES) {
+      tries++;
+      var r = 3 + rand() * 3.5; // 3 - 6.5 tile radius
+      var maxR = Math.ceil(r + 1.6); // wobble bound so checks cover the real edge
+      var margin = maxR + GAP + EDGE_GAP;
+      if (margin * 2 + 2 >= W || margin * 2 + 2 >= H) continue;
+      var cx = margin + ((rand() * (W - margin * 2)) | 0);
+      var cy = margin + ((rand() * (H - margin * 2)) | 0);
+      if (biome[idx(cx, cy)] !== OCEAN) continue;
+      var ok = true;
+      var k;
+      for (k = 0; k < placed.length && ok; k++) {
+        var o = placed[k];
+        var odx = cx - o.x, ody = cy - o.y;
+        if (Math.sqrt(odx * odx + ody * ody) < maxR + o.r + GAP * 2) ok = false;
+      }
+      if (!ok) continue;
+      var x0 = cx - maxR - GAP, x1 = cx + maxR + GAP;
+      var y0 = cy - maxR - GAP, y1 = cy + maxR + GAP;
+      // Keep open water to the border (islands never touch the edge)
+      if (x0 < EDGE_GAP || y0 < EDGE_GAP || x1 >= W - EDGE_GAP || y1 >= H - EDGE_GAP) continue;
+      for (var yy = y0; yy <= y1 && ok; yy++) {
+        for (var xx = x0; xx <= x1; xx++) {
+          if (!inBounds(xx, yy)) { ok = false; break; }
+          var ddx = xx - cx, ddy = yy - cy;
+          if (Math.sqrt(ddx * ddx + ddy * ddy) <= maxR + GAP) {
+            if (biome[idx(xx, yy)] !== OCEAN) { ok = false; break; }
+          }
+        }
+      }
+      if (!ok) continue;
+      // Carve the island: pure sand, wobbly natural shoreline
+      for (var iy = Math.floor(cy - maxR - 1); iy <= Math.ceil(cy + maxR + 1); iy++) {
+        for (var ix = Math.floor(cx - maxR - 1); ix <= Math.ceil(cx + maxR + 1); ix++) {
+          if (!inBounds(ix, iy)) continue;
+          var wx = ix - cx, wy = iy - cy;
+          var wd = Math.sqrt(wx * wx + wy * wy);
+          var wob = (hash2(ix, iy, seed + 901) - 0.5) * 1.6 +
+                    (fbm(ix * 0.25 + cx * 0.7, iy * 0.25 + cy * 0.7, 2) - 0.5) * 1.2;
+          if (wd < r + wob) {
+            var ii = idx(ix, iy);
+            biome[ii] = SAND;
+            elev[ii] = SAND_LINE + 0.03 + hash2(ix, iy, seed + 902) * 0.05;
+          }
+        }
+      }
+      // Drop any detached specks so each island stays one solid sand blob
+      // (shoreline wobble can strand a lone tile just off the beach).
+      (function tidyIsland() {
+        var bx0 = cx - maxR - 2, bx1 = cx + maxR + 2;
+        var by0 = cy - maxR - 2, by1 = cy + maxR + 2;
+        var seenIsl = new Uint8Array(W * H);
+        var ci0 = idx(cx, cy);
+        if (biome[ci0] !== SAND) return;
+        var qs = [ci0];
+        seenIsl[ci0] = 1;
+        while (qs.length) {
+          var cc0 = qs.pop();
+          var ccx = cc0 % W, ccy = (cc0 / W) | 0;
+          var d4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+          for (var d = 0; d < 4; d++) {
+            var nxx = ccx + d4[d][0], nyy = ccy + d4[d][1];
+            if (nxx < bx0 || nyy < by0 || nxx > bx1 || nyy > by1) continue;
+            if (!inBounds(nxx, nyy)) continue;
+            var nni = idx(nxx, nyy);
+            if (seenIsl[nni] || biome[nni] !== SAND) continue;
+            seenIsl[nni] = 1;
+            qs.push(nni);
+          }
+        }
+        for (var ty0 = by0; ty0 <= by1; ty0++) {
+          for (var tx0 = bx0; tx0 <= bx1; tx0++) {
+            if (!inBounds(tx0, ty0)) continue;
+            var ti0 = idx(tx0, ty0);
+            if (biome[ti0] === SAND && !seenIsl[ti0]) {
+              biome[ti0] = OCEAN;
+              elev[ti0] = WATER_LEVEL - 0.05 - hash2(tx0, ty0, seed + 902) * 0.05;
+            }
+          }
+        }
+      })();
+      placed.push({ x: cx, y: cy, r: maxR });
+    }
+    islandSpots = placed;
+  })();
+
+  // Snowy top-left: grass up there gets snow, under a wobbly diagonal
+  // snowline (x + y). Ocean and beaches stay as they are — snow is
+  // grassland only, and it never reaches the center spawn. Ponds deep in
+  // the snow freeze over to ice.
+  snow.fill(0);
+  ice.fill(0);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var sni = idx(x, y);
+      if (biome[sni] !== GRASS) continue;
+      var snowline = 150 + (fbm(x * 0.025 + 500, y * 0.025 + 500, 3) - 0.5) * 70;
+      if (x + y < snowline) snow[sni] = 1;
+    }
+  }
+  // Freeze ponds that sit IN the snow: if at least half a pond's tiles
+  // touch snow, the whole connected pond freezes (still no half-frozen
+  // ponds). Ponds just touching the snow's edge stay open water.
+  var iseen = new Uint8Array(W * H);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var iice = idx(x, y);
+      if (biome[iice] !== WATER || iseen[iice]) continue;
+      var rgn = [];
+      var rq = [[x, y]];
+      iseen[iice] = 1;
+      var nearCount = 0;
+      while (rq.length) {
+        var rc = rq.pop();
+        rgn.push(rc);
+        var touchesSnow = false;
+        for (var iyy = -2; iyy <= 2 && !touchesSnow; iyy++) {
+          for (var ixx = -2; ixx <= 2; ixx++) {
+            if (!ixx && !iyy) continue;
+            if (!inBounds(rc[0] + ixx, rc[1] + iyy)) continue;
+            if (snow[idx(rc[0] + ixx, rc[1] + iyy)]) { touchesSnow = true; break; }
+          }
+        }
+        if (touchesSnow) nearCount++;
+        var rd4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (var ird = 0; ird < 4; ird++) {
+          var rnx = rc[0] + rd4[ird][0], rny = rc[1] + rd4[ird][1];
+          if (!inBounds(rnx, rny)) continue;
+          var rni = idx(rnx, rny);
+          if (biome[rni] !== WATER || iseen[rni]) continue;
+          iseen[rni] = 1;
+          rq.push([rnx, rny]);
+        }
+      }
+      if (nearCount * 2 >= rgn.length) {
+        for (var ri = 0; ri < rgn.length; ri++) ice[idx(rgn[ri][0], rgn[ri][1])] = 1;
+      }
+    }
+  }
+
+  // Open pond-water spots (tile + all 8 neighbors wet and iceless) where
+  // newcomer ducks paddle in. Water is final by now, so this lasts the map.
+  duckSpots = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var dspi = idx(x, y);
+      if (biome[dspi] !== WATER || ice[dspi]) continue;
+      var owOk = true;
+      for (var owy = -1; owy <= 1 && owOk; owy++) {
+        for (var owx = -1; owx <= 1; owx++) {
+          if (!owx && !owy) continue;
+          var owxx = x + owx, owyy = y + owy;
+          if (!inBounds(owxx, owyy)) continue;
+          var owi = idx(owxx, owyy);
+          if (biome[owi] !== WATER || ice[owi]) { owOk = false; break; }
+        }
+      }
+      if (owOk) duckSpots.push(dspi);
+    }
+  }
+
+  // Pond fish: a few slow fish per inland water region (tiny ponds stay empty)
+  fishes = [];
+  var fseen = new Uint8Array(W * H);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var ffi = idx(x, y);
+      if (biome[ffi] !== WATER || fseen[ffi]) continue;
+      var fregion = [];
+      var fq = [[x, y]];
+      fseen[ffi] = 1;
+      while (fq.length) {
+        var fc = fq.pop();
+        fregion.push(fc);
+        var fdirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (var fdi = 0; fdi < 4; fdi++) {
+          var fnx = fc[0] + fdirs[fdi][0], fny = fc[1] + fdirs[fdi][1];
+          if (!inBounds(fnx, fny)) continue;
+          var fni = idx(fnx, fny);
+          if (biome[fni] !== WATER || fseen[fni]) continue;
+          fseen[fni] = 1;
+          fq.push([fnx, fny]);
+        }
+      }
+      var hasBig = false;
+      for (var bci = 0; bci < fregion.length; bci++) {
+        if (bigLake[idx(fregion[bci][0], fregion[bci][1])]) { hasBig = true; break; }
+      }
+      var want = hasBig ? Math.min(8, 3 + ((fregion.length / 60) | 0)) : Math.min(3, (fregion.length / 25) | 0);
+      for (var fi2 = 0; fi2 < want; fi2++) {
+        var fcell = fregion[(hash2(fi2 * 7 + 1, fregion.length, seed + 501) * fregion.length) | 0];
+        fishes.push({
+          x: (fcell[0] + 0.5) * TILE,
+          y: (fcell[1] + 0.5) * TILE,
+          heading: hash2(fi2 * 13, fregion.length, seed + 502) * Math.PI * 2,
+          speed: 22 + hash2(fi2 * 29, fregion.length, seed + 503) * 18,
+          turn: 0
+        });
+      }
+    }
+  }
+
+  // Ocean fish: scattered through the open sea. Hash-placed (no rand) so
+  // the tree/palm/crab layouts after this stay exactly as before.
+  var seaWanted = 90;
+  for (var seai = 0; seai < 4000 && seaWanted > 0; seai++) {
+    var seax = (hash2(seai * 5 + 11, 913, seed + 521) * W) | 0;
+    var seay = (hash2(seai * 7 + 3, 517, seed + 522) * H) | 0;
+    if (biome[idx(seax, seay)] !== OCEAN) continue;
+    var openSea = true; // start well clear of shores and shallows
+    for (var seayy = -2; seayy <= 2 && openSea; seayy++) {
+      for (var seaxx = -2; seaxx <= 2; seaxx++) {
+        if (!seaxx && !seayy) continue;
+        var seaxn = seax + seaxx, seayn = seay + seayy;
+        if (!inBounds(seaxn, seayn)) continue;
+        if (biome[idx(seaxn, seayn)] !== OCEAN) { openSea = false; break; }
+      }
+    }
+    if (!openSea) continue;
+    fishes.push({
+      x: (seax + 0.5) * TILE,
+      y: (seay + 0.5) * TILE,
+      heading: hash2(seai * 13 + 5, 131, seed + 523) * Math.PI * 2,
+      speed: 26 + hash2(seai * 17 + 9, 719, seed + 524) * 22,
+      turn: 0,
+      sea: 1
+    });
+    seaWanted--;
+  }
+
+  // Ducks: a few per inland water region (ponds + big lake), each with its
+  // own size and coloring. Hash-placed like the sea fish so later rand
+  // layouts don't shift.
+  ducks = [];
+  var dkseen = new Uint8Array(W * H);
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var dksi = idx(x, y);
+      if (biome[dksi] !== WATER || dkseen[dksi]) continue;
+      var dkregion = [];
+      var dkq = [[x, y]];
+      dkseen[dksi] = 1;
+      while (dkq.length) {
+        var dkfc = dkq.pop();
+        dkregion.push(dkfc);
+        var dkdirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (var dkfdi = 0; dkfdi < 4; dkfdi++) {
+          var dkfnx = dkfc[0] + dkdirs[dkfdi][0], dkfny = dkfc[1] + dkdirs[dkfdi][1];
+          if (!inBounds(dkfnx, dkfny)) continue;
+          var dkfni = idx(dkfnx, dkfny);
+          if (biome[dkfni] !== WATER || dkseen[dkfni]) continue;
+          dkseen[dkfni] = 1;
+          dkq.push([dkfnx, dkfny]);
+        }
+      }
+      var dkBig = false, dkIcy = false;
+      for (var dkbci = 0; dkbci < dkregion.length; dkbci++) {
+        var dkbi = idx(dkregion[dkbci][0], dkregion[dkbci][1]);
+        if (bigLake[dkbi]) dkBig = true;
+        if (ice[dkbi]) { dkIcy = true; break; }
+      }
+      if (dkIcy) continue; // frozen ponds get no ducks
+      var dkwant = dkBig ? 4 : (dkregion.length > 60 ? 2 : 1);
+      for (var dki2 = 0; dki2 < dkwant; dki2++) {
+        var dkcell = dkregion[(hash2(dki2 * 11 + 5, dkregion.length, seed + 531) * dkregion.length) | 0];
+        var dktone = DUCK_TONES[(hash2(dki2 * 17 + 2, dkregion.length, seed + 532) * DUCK_TONES.length) | 0];
+        var dkdrake = hash2(dki2 * 23 + 7, dkregion.length, seed + 533) < 0.45;
+        ducks.push({
+          x: (dkcell[0] + 0.5) * TILE,
+          y: (dkcell[1] + 0.5) * TILE,
+          heading: hash2(dki2 * 29 + 1, dkregion.length, seed + 534) * Math.PI * 2,
+          speed: 26 + hash2(dki2 * 31 + 3, dkregion.length, seed + 535) * 14,
+          turn: 0,
+          state: 'swim',
+          timer: 6 + hash2(dki2 * 37 + 9, dkregion.length, seed + 536) * 20,
+          tx: 0, ty: 0,
+          lwX: (dkcell[0] + 0.5) * TILE, lwY: (dkcell[1] + 0.5) * TILE,
+          sc: 0.8 + hash2(dki2 * 41 + 4, dkregion.length, seed + 537) * 0.6,
+          body: dktone[0],
+          head: dkdrake ? '#1f7a3d' : dktone[1],
+          drake: dkdrake,
+          wake: hash2(dki2 * 43 + 6, dkregion.length, seed + 538) * 0.45,
+          age: hash2(dki2 * 47 + 8, dkregion.length, seed + 539) * 150, // staggered so deaths spread out
+          lifespan: 180, // adults live 3 minutes, then slowly fade away
+          nester: hash2(dki2 * 53 + 1, dkregion.length, seed + 540) < 0.2, // 1 in 5 builds nests
+          nest: null,
+          layT: 0,
+          deathT: 0,
+          fade: 1,
+          chick: false
+        });
+      }
+    }
+  }
+
+  // Start at the duck minimum: top up quiet ponds to 25 newcomers with
+  // seeded randomness, so the map (and everything placed after) is stable.
+  var dkR = 0;
+  function dkHash() { dkR++; return hash2(dkR * 13 + 7, 67, seed + 542); }
+  while (ducks.length < 25 && duckSpots.length) {
+    var topSpot = duckSpots[(dkHash() * duckSpots.length) | 0];
+    spawnDuck((topSpot % W + 0.5) * TILE, (((topSpot / W) | 0) + 0.5) * TILE, dkHash);
+  }
+
+  // Water is walkable (half speed — see update); only trees/palms/stumps are solid
+  trees.fill(0); pines.fill(0); pineA.fill(1); pineTrunkA.fill(0); palms.fill(0); palmA.fill(1); palmTrunkA.fill(0); bushes.fill(0); solid.fill(0); berryN.fill(0); berryT.fill(0); litter.fill(0); stumps.fill(0); mushN.fill(0); mushT.fill(0); open.fill(0); noBush.fill(0); shells.fill(0);
+
+  // Trees: random scatter inside forest areas (natural, not grid-like).
+  // Candidates are shuffled and each tree keeps room for its own canopy,
+  // so canopies never sit inside each other (small trees may cozy up,
+  // big trees stand apart).
+  var placedX = [], placedY = [], placedS = [], taken = [];
+  var BC = 64;
+  var BW = Math.ceil(WORLD_PX / BC), BH = Math.ceil(WORLD_PY / BC);
+  var buckets = new Array(BW * BH);
+  // returns -1 = reject, -2 = clean accept, or partner index = snuggle accept
+  function treeOK(px, py, sc, cozy) {
+    var xa = Math.max(0, Math.floor((px - 170) / BC)), xb = Math.min(BW - 1, Math.floor((px + 170) / BC));
+    var ya = Math.max(0, Math.floor((py - 170) / BC)), yb = Math.min(BH - 1, Math.floor((py + 170) / BC));
+    var touches = 0, minD = Infinity, partner = -1;
+    for (var cy = ya; cy <= yb; cy++) {
+      for (var cx = xa; cx <= xb; cx++) {
+        var arr = buckets[cy * BW + cx];
+        if (!arr) continue;
+        for (var k = 0; k < arr.length; k++) {
+          var j = arr[k];
+          var dx = px - placedX[j], dy = py - placedY[j];
+          var d = Math.sqrt(dx * dx + dy * dy);
+          if (d < minD) minD = d;
+          var need = 27.5 * (sc + placedS[j]) + 4;
+          if (d < need) { touches++; partner = j; }
+          if (touches > 1) return -1;
+        }
+      }
+    }
+    if (touches === 0) return -2;
+    // snuggle exactly one neighbor that isn't already snuggling; trunks stay apart
+    if (!cozy || taken[partner] || minD < 34) return -1;
+    return partner;
+  }
+  var cands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i3 = idx(x, y);
+      if (biome[i3] !== GRASS || snow[i3]) continue; // snowy woods grow pines instead
+      var sdx = x - spawn.x, sdy = y - spawn.y;
+      if (sdx * sdx + sdy * sdy < 36) continue;
+      if (fbm(x * 0.03 + 300, y * 0.03 + 300, 3) > 0.54) cands.push(i3);
+    }
+  }
+  for (var si = cands.length - 1; si > 0; si--) {
+    var sj = (rand() * (si + 1)) | 0;
+    var tmp = cands[si]; cands[si] = cands[sj]; cands[sj] = tmp;
+  }
+  var placed = 0;
+  for (var ci = 0; ci < cands.length && placed < 1000; ci++) {
+    var cix = cands[ci];
+    var cxx = cix % W, cyy = (cix / W) | 0;
+    var csc = treeScale(cxx, cyy);
+    var cxp = (cxx + 0.5) * TILE, cyp = (cyy + 0.5) * TILE;
+    var cozy = rand() < 0.06; // plenty of trees may snuggle one neighbor
+    var verdict = treeOK(cxp, cyp, csc, cozy);
+    if (verdict === -1) continue;
+    var id = placedX.length;
+    placedX.push(cxp); placedY.push(cyp); placedS.push(csc); taken.push(0);
+    if (verdict >= 0) { taken[verdict] = 1; taken[id] = 1; }
+    var bix = Math.min(BH - 1, Math.floor(cyp / BC)) * BW + Math.min(BW - 1, Math.floor(cxp / BC));
+    if (!buckets[bix]) buckets[bix] = [];
+    buckets[bix].push(id);
+    trees[cix] = 1;
+    solid[cix] = 1;
+    placed++;
+  }
+
+  // Pines: snowy evergreens on snowy grass, sharing the trees' spacing map
+  // so crowns never crowd. Hash-ordered (no rand) so stump/palm/crab
+  // layouts after this stay exactly as before.
+  var pcands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var pi3 = idx(x, y);
+      if (biome[pi3] !== GRASS || !snow[pi3]) continue;
+      var psdx = x - spawn.x, psdy = y - spawn.y;
+      if (psdx * psdx + psdy * psdy < 36) continue;
+      if (fbm(x * 0.03 + 300, y * 0.03 + 300, 3) > 0.48) pcands.push(pi3);
+    }
+  }
+  pcands.sort(function (a, b) {
+    return hash2(a % W, (a / W) | 0, seed + 611) - hash2(b % W, (b / W) | 0, seed + 611);
+  });
+  var placedP = 0;
+  for (var pci = 0; pci < pcands.length && placedP < 220; pci++) {
+    var pcix = pcands[pci];
+    var pcxx = pcix % W, pcyy = (pcix / W) | 0;
+    var pcsc = pineScale(pcxx, pcyy);
+    var pcxp = (pcxx + 0.5) * TILE, pcyp = (pcyy + 0.5) * TILE;
+    var pcozy = hash2(pcxx, pcyy, seed + 612) < 0.06;
+    var pverdict = treeOK(pcxp, pcyp, pcsc, pcozy);
+    if (pverdict === -1) continue;
+    var pid = placedX.length;
+    placedX.push(pcxp); placedY.push(pcyp); placedS.push(pcsc); taken.push(0);
+    if (pverdict >= 0) { taken[pverdict] = 1; taken[pid] = 1; }
+    var pbix = Math.min(BH - 1, Math.floor(pcyp / BC)) * BW + Math.min(BW - 1, Math.floor(pcxp / BC));
+    if (!buckets[pbix]) buckets[pbix] = [];
+    buckets[pbix].push(pid);
+    pines[pcix] = 1;
+    solid[pcix] = 1;
+    placedP++;
+  }
+
+  // Palms on ocean beaches + islands: SAND with the ocean nearby (never
+  // lakes). Islands get 1-3 palms each (most islands, not all); mainland
+  // beaches get a sparse scatter. Palms keep 2 tiles from each other and
+  // from trees/stumps so trunks stay well apart.
+  function palmBeach(tx, ty) {
+    for (var oy = -2; oy <= 2; oy++) {
+      for (var ox = -2; ox <= 2; ox++) {
+        if (!ox && !oy) continue;
+        var nx = tx + ox, ny = ty + oy;
+        if (!inBounds(nx, ny)) continue;
+        if (biome[idx(nx, ny)] === OCEAN) return true;
+      }
+    }
+    return false;
+  }
+  function palmClear(tx, ty) {
+    for (var oy = -2; oy <= 2; oy++) {
+      for (var ox = -2; ox <= 2; ox++) {
+        var nx = tx + ox, ny = ty + oy;
+        if (!inBounds(nx, ny)) continue;
+        var ni = idx(nx, ny);
+        if (palms[ni] || trees[ni] || stumps[ni] || pines[ni]) return false;
+      }
+    }
+    return true;
+  }
+  function tryPalm(tx, ty) {
+    if (!inBounds(tx, ty)) return false;
+    if (tx < 1 || ty < 1 || tx >= W - 1 || ty >= H - 1) return false; // keep crowns on-screen
+    var pi = idx(tx, ty);
+    if (biome[pi] !== SAND || palms[pi] || trees[pi] || stumps[pi]) return false;
+    if (!palmBeach(tx, ty)) return false;
+    if (!palmClear(tx, ty)) return false;
+    for (var snoy = -3; snoy <= 3; snoy++) { // palms stay out of the snowy corner
+      for (var snox = -3; snox <= 3; snox++) {
+        if (!inBounds(tx + snox, ty + snoy)) continue;
+        if (snow[idx(tx + snox, ty + snoy)]) return false;
+      }
+    }
+    palms[pi] = 1;
+    solid[pi] = 1;
+    return true;
+  }
+  // Islands first so every visitable island has a chance at shade
+  for (var spi = 0; spi < islandSpots.length; spi++) {
+    var sp = islandSpots[spi];
+    if (hash2(sp.x, sp.y, seed + 913) < 0.2) continue; // ~1 in 5 islands stays bare
+    var wantPalm = 1 + ((hash2(sp.x, sp.y, seed + 911) * 3) | 0); // 1-3
+    var triesP = 0;
+    while (wantPalm > 0 && triesP < 40) {
+      triesP++;
+      var pa = rand() * Math.PI * 2;
+      var pr = rand() * sp.r;
+      var ptx = Math.round(sp.x + Math.cos(pa) * pr);
+      var pty = Math.round(sp.y + Math.sin(pa) * pr);
+      if (tryPalm(ptx, pty)) wantPalm--;
+    }
+  }
+  // Mainland ocean beaches: sparse scatter
+  var palmCands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var pci = idx(x, y);
+      if (biome[pci] !== SAND || palms[pci]) continue;
+      if (palmBeach(x, y)) palmCands.push(pci);
+    }
+  }
+  for (var psh = palmCands.length - 1; psh > 0; psh--) {
+    var pq = (rand() * (psh + 1)) | 0;
+    var ptmp = palmCands[psh]; palmCands[psh] = palmCands[pq]; palmCands[pq] = ptmp;
+  }
+  var palmsWanted = 35;
+  for (var pc2 = 0; pc2 < palmCands.length && palmsWanted > 0; pc2++) {
+    if (tryPalm(palmCands[pc2] % W, (palmCands[pc2] / W) | 0)) palmsWanted--;
+  }
+
+  // Open-field mask: grass with no trees nearby (wildflowers live here)
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var oi = idx(x, y);
+      if (biome[oi] !== GRASS) continue;
+      var oe = true;
+      for (var oy = y - 2; oy <= y + 2 && oe; oy++) {
+        for (var ox = x - 2; ox <= x + 2 && oe; ox++) {
+          if (ox < 0 || oy < 0 || ox >= W || oy >= H) continue;
+          if (trees[idx(ox, oy)]) oe = false;
+        }
+      }
+      if (oe) open[oi] = 1;
+    }
+  }
+
+  // Forest floor: fallen leaves + sticks scattered near trees
+  for (var ly = 0; ly < H; ly++) {
+    for (var lx = 0; lx < W; lx++) {
+      if (!trees[idx(lx, ly)]) continue;
+      for (var oy = -2; oy <= 2; oy++) {
+        for (var ox = -2; ox <= 2; ox++) {
+          var gx = lx + ox, gy = ly + oy;
+          if (!inBounds(gx, gy)) continue;
+          var gi = idx(gx, gy);
+          if (biome[gi] !== GRASS) continue;
+          if (hash2(gx, gy, seed + 101) < 0.38) {
+            litter[gi] = 1 + ((hash2(gx, gy, seed + 102) * 3) | 0); // 1..3
+          }
+        }
+      }
+    }
+  }
+
+  // A couple of old stumps on the forest floor (rare)
+  var stumpsWanted = 25, stumpTries = 0;
+  while (stumpsWanted > 0 && stumpTries < 1500) {
+    stumpTries++;
+    var qx = (rand() * W) | 0, qy = (rand() * H) | 0;
+    var qi = idx(qx, qy);
+    if (biome[qi] !== GRASS || snow[qi] || trees[qi] || bushes[qi] || stumps[qi]) continue;
+    var qdx = qx - spawn.x, qdy = qy - spawn.y;
+    if (qdx * qdx + qdy * qdy < 64) continue;
+    if (fbm(qx * 0.03 + 300, qy * 0.03 + 300, 3) <= 0.54) continue;
+    var clear = true, nearTree = false;
+    for (var sy2 = qy - 5; sy2 <= qy + 5 && clear; sy2++) {
+      for (var sx2 = qx - 5; sx2 <= qx + 5 && clear; sx2++) {
+        if (!inBounds(sx2, sy2)) continue;
+        var sk = idx(sx2, sy2);
+        if (!trees[sk] && !stumps[sk]) continue;
+        var ddx = (qx - sx2) * TILE, ddy = (qy - sy2) * TILE;
+        var d2 = ddx * ddx + ddy * ddy;
+        if (trees[sk]) {
+          nearTree = true;
+          if (d2 < 70 * 70) clear = false;
+        }
+        if (stumps[sk] && d2 < 160 * 160) clear = false;
+      }
+    }
+    if (!clear || !nearTree) continue;
+    stumps[qi] = 1;
+    solid[qi] = 1;
+    if (hash2(qx, qy, 135) < 0.6) { mushN[qi] = 3; mushT[qi] = 0; }
+    stumpsWanted--;
+  }
+
+  // Keep bushes clear of stumps so nothing visually overlaps them
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var zi = idx(x, y);
+      var zrad = 0;
+      if (stumps[zi]) zrad = 70;
+      if (!zrad) continue;
+      var zpx = (x + 0.5) * TILE, zpy = (y + 0.5) * TILE;
+      var zxa = Math.max(0, Math.floor((zpx - zrad) / TILE)), zxb = Math.min(W - 1, Math.floor((zpx + zrad) / TILE));
+      var zya = Math.max(0, Math.floor((zpy - zrad) / TILE)), zyb = Math.min(H - 1, Math.floor((zpy + zrad) / TILE));
+      for (var zcy = zya; zcy <= zyb; zcy++) {
+        for (var zcx = zxa; zcx <= zxb; zcx++) {
+          var zdx = (zcx + 0.5) * TILE - zpx, zdy = (zcy + 0.5) * TILE - zpy;
+          if (zdx * zdx + zdy * zdy < zrad * zrad) noBush[idx(zcx, zcy)] = 1;
+        }
+      }
+    }
+  }
+
+  // Bushes: random scatter on open grass, keeping clear of logs and stumps
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var i4 = idx(x, y);
+      if (biome[i4] !== GRASS || trees[i4] || noBush[i4]) continue;
+      var bdx = x - spawn.x, bdy = y - spawn.y;
+      if (bdx * bdx + bdy * bdy < 25) continue;
+      var wet = false; // keep bushes off the dark pond/lake banks
+      for (var wy2 = -2; wy2 <= 2 && !wet; wy2++) {
+        for (var wx2 = -2; wx2 <= 2; wx2++) {
+          if (!wx2 && !wy2) continue;
+          var wvx = x + wx2, wvy = y + wy2;
+          if (!inBounds(wvx, wvy)) continue;
+          if (biome[idx(wvx, wvy)] === WATER) { wet = true; break; }
+        }
+      }
+      if (wet) continue;
+      if (hash2(x, y, seed + 9) < 0.07) {
+        bushes[i4] = 1;
+        berryN[i4] = 3;
+        berryT[i4] = 0;
+      }
+    }
+  }
+
+  // Shells on ocean beaches (never by lakes or rivers)
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var si2 = idx(x, y);
+      if (biome[si2] !== SAND) continue;
+      var byOcean = false;
+      for (var oy = -1; oy <= 1 && !byOcean; oy++) {
+        for (var ox = -1; ox <= 1 && !byOcean; ox++) {
+          if (!ox && !oy) continue;
+          var nx = x + ox, ny = y + oy;
+          if (!inBounds(nx, ny)) continue;
+          if (biome[idx(nx, ny)] === OCEAN) byOcean = true;
+        }
+      }
+      if (byOcean && hash2(x, y, seed + 201) < 0.14) {
+        shells[si2] = 1 + ((hash2(x, y, seed + 202) * 3) | 0); // 1..3
+      }
+    }
+  }
+
+  // Rare beach-crab holes on ocean sand
+  crabHoles = [];
+  var ccands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var ci = idx(x, y);
+      if (biome[ci] !== SAND) continue;
+      var isBeach = false;
+      for (var coy = -1; coy <= 1 && !isBeach; coy++) {
+        for (var cox = -1; cox <= 1 && !isBeach; cox++) {
+          if (!cox && !coy) continue;
+          var cnx = x + cox, cny = y + coy;
+          if (!inBounds(cnx, cny)) continue;
+          if (biome[idx(cnx, cny)] === OCEAN) isBeach = true;
+        }
+      }
+      if (!isBeach) continue;
+      // keep crab holes clear of palm trunks so crabs can skitter around
+      var palmNear = false;
+      for (var poy = -2; poy <= 2 && !palmNear; poy++) {
+        for (var pox = -2; pox <= 2; pox++) {
+          var pnx = x + pox, pny = y + poy;
+          if (!inBounds(pnx, pny)) continue;
+          if (palms[idx(pnx, pny)]) { palmNear = true; break; }
+        }
+      }
+      if (palmNear) continue;
+      var snowNear = false; // beach crabs stay off snowy shores
+      for (var snowy = -2; snowy <= 2 && !snowNear; snowy++) {
+        for (var snowx = -2; snowx <= 2; snowx++) {
+          if (!inBounds(x + snowx, y + snowy)) continue;
+          if (snow[idx(x + snowx, y + snowy)]) { snowNear = true; break; }
+        }
+      }
+      if (snowNear) continue;
+      ccands.push(ci);
+    }
+  }
+  for (var si2 = ccands.length - 1; si2 > 0; si2--) {
+    var sj2 = (rand() * (si2 + 1)) | 0;
+    var tmp2 = ccands[si2]; ccands[si2] = ccands[sj2]; ccands[sj2] = tmp2;
+  }
+  for (var hi3 = 0; hi3 < ccands.length && crabHoles.length < 30; hi3++) {
+    var hx = (ccands[hi3] % W + 0.5) * TILE, hy = (((ccands[hi3] / W) | 0) + 0.5) * TILE;
+    var far = true;
+    for (var pi = 0; pi < crabHoles.length; pi++) {
+      var pdx = hx - crabHoles[pi].x, pdy = hy - crabHoles[pi].y;
+      if (pdx * pdx + pdy * pdy < 120 * 120) { far = false; break; }
+    }
+    if (!far) continue;
+    crabHoles.push({ x: hx, y: hy, state: 'hidden', timer: 8 + ((seed + crabHoles.length * 37) % 40), cx: hx, cy: hy, tx: hx, ty: hy, pause: 0, heading: 0 });
+  }
+
+  // Bunny burrows out in the open fields, each starting a little colony.
+  // Placed last with rand (nothing random comes after but the minimap).
+  burrows = [];
+  bunnies = [];
+  var bcands = [];
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var bunC = idx(x, y);
+      if (biome[bunC] !== GRASS || !open[bunC] || bushes[bunC] || stumps[bunC] || solid[bunC]) continue;
+      bcands.push(bunC);
+    }
+  }
+  for (var bsh = bcands.length - 1; bsh > 0; bsh--) {
+    var bsq = (rand() * (bsh + 1)) | 0;
+    var btmp = bcands[bsh]; bcands[bsh] = bcands[bsq]; bcands[bsq] = btmp;
+  }
+  for (var bhi = 0; bhi < bcands.length && burrows.length < 7; bhi++) {
+    var bunX = (bcands[bhi] % W + 0.5) * TILE, bunY = (((bcands[bhi] / W) | 0) + 0.5) * TILE;
+    var bunFar = true;
+    for (var bpi = 0; bpi < burrows.length; bpi++) {
+      var bdx = bunX - burrows[bpi].x, bdy = bunY - burrows[bpi].y;
+      if (bdx * bdx + bdy * bdy < 150 * 150) { bunFar = false; break; }
+    }
+    if (!bunFar) continue;
+    var bur = { x: bunX, y: bunY, breedT: 30 + rand() * 30 };
+    burrows.push(bur);
+    spawnBunny(bur, false);
+    spawnBunny(bur, false);
+  }
+
+  buildMinimap();
+  return spawn;
+}
+
+// ---------- Minimap ----------
+var mapCanvas = document.createElement('canvas');
+mapCanvas.width = W; mapCanvas.height = H;
+function buildMinimap() {
+  var ctx = mapCanvas.getContext('2d');
+  var img = ctx.createImageData(W, H);
+  for (var y = 0; y < H; y++) {
+    for (var x = 0; x < W; x++) {
+      var i = idx(x, y), o = i * 4;
+      var r = 60, g = 179, b = 113;
+      if (biome[i] === OCEAN) { r = 20; g = 60; b = 140; }
+      else if (biome[i] === WATER) {
+        if (bigLake[i]) { r = 32; g = 110; b = 185; }
+        else if (ice[i]) { r = 207; g = 227; b = 242; }
+        else { r = 52; g = 152; b = 219; }
+      }
+      else if (palms[i]) { r = 34; g = 139; b = 70; }
+      else if (biome[i] === SAND) { r = 244; g = 226; b = 133; }
+      else if (pines[i]) { r = 27; g = 94; b = 78; }
+      else if (trees[i]) { r = 20; g = 90; b = 40; }
+      else if (stumps[i]) { r = 122; g = 90; b = 60; }
+      else if (snow[i]) { r = 232; g = 240; b = 248; }
+      img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---------- Canvas / input ----------
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var dpr = 1, vw = 0, vh = 0;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  vw = window.innerWidth; vh = window.innerHeight;
+  canvas.width = Math.floor(vw * dpr);
+  canvas.height = Math.floor(vh * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+var keys = {};
+window.addEventListener('keydown', function (e) {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) !== -1) e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+});
+window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+// Touch joystick
+var joy = { active: false, id: null, bx: 0, by: 0, dx: 0, dy: 0 };
+canvas.addEventListener('touchstart', function (e) {
+  e.preventDefault();
+  if (joy.active) return;
+  var t = e.changedTouches[0];
+  joy.active = true; joy.id = t.identifier;
+  joy.bx = t.clientX; joy.by = t.clientY; joy.dx = 0; joy.dy = 0;
+}, { passive: false });
+canvas.addEventListener('touchmove', function (e) {
+  e.preventDefault();
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    var t = e.changedTouches[i];
+    if (t.identifier !== joy.id) continue;
+    var dx = t.clientX - joy.bx, dy = t.clientY - joy.by;
+    var len = Math.hypot(dx, dy), max = 55;
+    if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+    joy.dx = dx / max; joy.dy = dy / max;
+  }
+}, { passive: false });
+function joyEnd(e) {
+  for (var i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === joy.id) {
+      joy.active = false; joy.dx = 0; joy.dy = 0;
+    }
+  }
+}
+canvas.addEventListener('touchend', joyEnd);
+canvas.addEventListener('touchcancel', joyEnd);
+
+// ---------- Player ----------
+var player = { x: 0, y: 0, r: 9, fx: 0, fy: 1 };
+var spawnTile = generate(seed);
+player.x = (spawnTile.x + 0.5) * TILE;
+player.y = (spawnTile.y + 0.5) * TILE;
+var cam = { x: 0, y: 0 };
+var coordsEl = document.getElementById('coords');
+var berriesEl = document.getElementById('berries');
+var hiddenEl = document.getElementById('hidden-badge');
+var shroomsEl = document.getElementById('shrooms');
+
+function treeScale(tx, ty) { return 1.8 + hash2(tx, ty, 41) * 0.4; } // 1.8 - 2.2x
+function pineScale(tx, ty) { return 2.8 + hash2(tx, ty, 621) * 0.6; } // 2.8 - 3.4x, the giants up north
+function palmScale(tx, ty) { return 1.8 + hash2(tx, ty, 301) * 0.5; } // 1.8 - 2.3x, like regular trees
+function bushScale(tx, ty) {
+  if (open[idx(tx, ty)]) return 1.0 + hash2(tx, ty, 83) * 0.5; // fields: 1.0 - 1.5x
+  return 1.5 + hash2(tx, ty, 83) * 0.7; // forests: 1.5 - 2.2x
+}
+function stumpScale(tx, ty) { return 1.2 + hash2(tx, ty, 111) * 0.3; } // 1.2 - 1.5x
+function mushScale(tx, ty, k) { return 0.8 + hash2(tx + k * 13, ty + k * 29, 133) * 1.0; } // 0.8x - 1.8x
+function shroomPos(tx, ty, k) {
+  // stump mushrooms grow in a cluster on one random side
+  var cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
+  var a0 = hash2(tx, ty, 137) * Math.PI * 2;
+  var a = a0 + (hash2(tx + k * 7, ty + k * 11, 149) - 0.5) * 1.8;
+  var rr = 11 * stumpScale(tx, ty) + 2 + hash2(tx + k * 3, ty + k * 5, 151) * 4;
+  return { x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr };
+}
+
+function crabDart(ch) {
+  for (var a = 0; a < 6; a++) {
+    var ang = Math.random() * Math.PI * 2;
+    var dist = 25 + Math.random() * 45;
+    var nx = ch.x + Math.cos(ang) * dist, ny = ch.y + Math.sin(ang) * dist;
+    var tx = Math.floor(nx / TILE), ty = Math.floor(ny / TILE);
+    if (!inBounds(tx, ty)) continue;
+    var b = biome[idx(tx, ty)];
+    if (b === WATER || b === OCEAN) continue;
+    ch.tx = nx; ch.ty = ny;
+    return;
+  }
+  ch.tx = ch.x; ch.ty = ch.y;
+}
+function isInWater(px, py) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  if (!inBounds(tx, ty)) return true;
+  var b = biome[idx(tx, ty)];
+  return b === WATER || b === OCEAN;
+}
+function isIce(px, py) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  if (!inBounds(tx, ty)) return false;
+  return ice[idx(tx, ty)] === 1;
+}
+// Walk one duck step toward (tx, ty) without entering trunk cores.
+// Returns true once close enough. Heading always faces travel.
+function duckStep(dk, tx, ty, sp, dt) {
+  var ddx = tx - dk.x, ddy = ty - dk.y;
+  var dd = Math.hypot(ddx, ddy);
+  if (dd < 0.5) return true;
+  var mv = Math.min(dd, sp * dt);
+  var mdx = ddx / dd * mv, mdy = ddy / dd * mv;
+  if (!hitsSolid(dk.x + mdx, dk.y)) dk.x += mdx;
+  if (!hitsSolid(dk.x, dk.y + mdy)) dk.y += mdy;
+  dk.heading = Math.atan2(ddy, ddx);
+  return dd <= 5;
+}
+// A bunny (baby or grown) moving into a burrow's colony
+function spawnBunny(home, baby) {
+  var snowBun = snow[idx(Math.floor(home.x / TILE), Math.floor(home.y / TILE))] === 1;
+  var tones = snowBun ? [[ '#eef1f4', '#c9d2da' ]] : [[ '#8a6f4d', '#6e5739' ], [ '#9aa0a6', '#7c8288' ]];
+  var tone = tones[(Math.random() * tones.length) | 0];
+  var gsc = 0.9 + Math.random() * 0.4;
+  bunnies.push({
+    x: home.x + (Math.random() - 0.5) * 20, y: home.y + (Math.random() - 0.5) * 20,
+    heading: Math.random() * Math.PI * 2,
+    state: 'hop', timer: Math.random() * 1.5, resting: true,
+    tx: 0, ty: 0, btx: -1, bty: -1,
+    sc: baby ? 0.5 : gsc, gsc: gsc,
+    tone: tone[0], dark: tone[1],
+    home: home, bx: home.x, by: home.y,
+    baby: !!baby, age: 0, lifespan: 180, deathT: 0, fade: 1, nibT: 0,
+    craveT: 15 + Math.random() * 20, homeT: 30 + Math.random() * 30
+  });
+}
+// True if a bunny can't hop there (wall, trunk, or open water)
+function bunnyBlocked(px, py) {
+  var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+  if (!inBounds(tx, ty)) return true;
+  var b = biome[idx(tx, ty)];
+  if (b === WATER || b === OCEAN) return true;
+  return hitsSolid(px, py);
+}
+// One hop forward; returns false if something stopped the hop
+function bunnyHop(bn, sp, dt) {
+  var step = sp * dt;
+  var ox = bn.x, oy = bn.y;
+  var nx = bn.x + Math.cos(bn.heading) * step;
+  if (!bunnyBlocked(nx, bn.y)) bn.x = nx;
+  var ny = bn.y + Math.sin(bn.heading) * step;
+  if (!bunnyBlocked(bn.x, ny)) bn.y = ny;
+  return Math.hypot(bn.x - ox, bn.y - oy) > step * 0.3;
+}
+// Nearest berry bush that still has berries (tile index, or -1)
+function findBerryBush(bn) {
+  var hx = Math.floor(bn.x / TILE), hy = Math.floor(bn.y / TILE);
+  var best = -1, bd = 1e9;
+  for (var oy = -10; oy <= 10; oy++) {
+    for (var ox = -10; ox <= 10; ox++) {
+      var nx = hx + ox, ny = hy + oy;
+      if (!inBounds(nx, ny)) continue;
+      var ni = idx(nx, ny);
+      if (!bushes[ni] || !berryN[ni]) continue;
+      var d = ox * ox + oy * oy;
+      if (d < bd) { bd = d; best = ni; }
+    }
+  }
+  return best;
+}
+// A new adult duck paddling in to keep the population up (min 25).
+// R is the random source (Math.random live, or a seeded one at build time).
+function spawnDuck(x, y, R) {
+  R = R || Math.random;
+  var tone = DUCK_TONES[(R() * DUCK_TONES.length) | 0];
+  var drake = R() < 0.45;
+  ducks.push({
+    x: x, y: y, heading: R() * Math.PI * 2,
+    speed: 26 + R() * 14, turn: 0,
+    state: 'swim', timer: 12 + R() * 20,
+    tx: 0, ty: 0, lwX: x, lwY: y,
+    sc: 0.8 + R() * 0.6,
+    body: tone[0], head: drake ? '#1f7a3d' : tone[1], drake: drake,
+    wake: R() * 0.45,
+    age: 0, lifespan: 180, nester: R() < 0.2,
+    nest: null, layT: 0, deathT: 0, fade: 1, chick: false
+  });
+}
+// An egg hatches next to its nest: a tiny chick that grows into an adult
+function hatchChick(nt) {
+  var tone = DUCK_TONES[(Math.random() * DUCK_TONES.length) | 0];
+  var drake = Math.random() < 0.45;
+  var gsc = 0.8 + Math.random() * 0.6;
+  var hx = nt.x + (Math.random() - 0.5) * 10, hy = nt.y + (Math.random() - 0.5) * 10;
+  ducks.push({
+    x: hx, y: hy, heading: Math.random() * Math.PI * 2,
+    speed: 26, turn: 0,
+    state: 'chick', timer: 1 + Math.random() * 2,
+    tx: nt.x, ty: nt.y, lwX: hx, lwY: hy,
+    sc: 0.45, gsc: gsc,
+    body: tone[0], head: drake ? '#1f7a3d' : tone[1], drake: drake,
+    wake: 0,
+    age: 0, lifespan: 180, nester: false,
+    nest: null, layT: 0, deathT: 0, fade: 1, chick: true,
+    nx: nt.x, ny: nt.y
+  });
+}
+// A nesting duck claims a nest site on a free shore tile nearby. The nest
+// starts as a bare hollow; the duck fetches sticks and grass
+// (progress/need) before it counts as built and egg-ready.
+function buildNest(dk) {
+  var homeX = Math.floor(dk.x / TILE), homeY = Math.floor(dk.y / TILE);
+  for (var a = 0; a < 20; a++) {
+    var nx = homeX + Math.round((Math.random() - 0.5) * 4);
+    var ny = homeY + Math.round((Math.random() - 0.5) * 4);
+    if (!inBounds(nx, ny)) continue;
+    var ni = idx(nx, ny);
+    var nb = biome[ni];
+    if ((nb !== GRASS && nb !== SAND) || snow[ni] || solid[ni] || bushes[ni]) continue;
+    var crowded = false;
+    for (var n = 0; n < nests.length; n++) {
+      var enx = Math.floor(nests[n].x / TILE), eny = Math.floor(nests[n].y / TILE);
+      if (Math.abs(enx - nx) <= 2 && Math.abs(eny - ny) <= 2) { crowded = true; break; }
+    }
+    if (crowded) continue;
+    var nt = { x: (nx + 0.5) * TILE, y: (ny + 0.5) * TILE, eggs: [], clutch: 2 + ((Math.random() * 3) | 0), age: 0, mom: dk, progress: 0, need: 5 + ((Math.random() * 3) | 0), built: false };
+    nests.push(nt);
+    dk.nest = nt;
+    dk.tx = nt.x; dk.ty = nt.y; dk.layT = 0;
+    return true;
+  }
+  return false;
+}
+// Drop an unfinished nest (gathering failed or builder died)
+function abandonNest(dk) {
+  if (!dk.nest) return;
+  var i = nests.indexOf(dk.nest);
+  if (i !== -1) nests.splice(i, 1);
+  dk.nest = null;
+}
+// Find building material near the duck: a grass tuft, or better a fallen
+// stick on grass by a tree. Sets dk.tx/ty + dk.carry color. True if found.
+function pickMaterial(dk) {
+  var homeX = Math.floor(dk.x / TILE), homeY = Math.floor(dk.y / TILE);
+  for (var pass = 0; pass < 2; pass++) {
+    for (var a = 0; a < 24; a++) {
+      var nx = homeX + Math.round((Math.random() - 0.5) * 12);
+      var ny = homeY + Math.round((Math.random() - 0.5) * 12);
+      if (!inBounds(nx, ny)) continue;
+      var ni = idx(nx, ny);
+      if (biome[ni] !== GRASS || solid[ni] || bushes[ni]) continue;
+      if (pass === 0) { // first pass: sticks — grass right by a tree
+        var byTree = false;
+        for (var oy = -1; oy <= 1 && !byTree; oy++) {
+          for (var ox = -1; ox <= 1; ox++) {
+            if (!ox && !oy) continue;
+            if (!inBounds(nx + ox, ny + oy)) continue;
+            if (trees[idx(nx + ox, ny + oy)]) { byTree = true; break; }
+          }
+        }
+        if (!byTree) continue;
+        dk.carry = '#7a5230'; // stick
+      } else {
+        dk.carry = '#3fa655'; // grass tuft
+      }
+      dk.tx = (nx + 0.5) * TILE; dk.ty = (ny + 0.5) * TILE;
+      return true;
+    }
+  }
+  return false;
+}
+function hitsSolid(px, py) {
+  var r = player.r - 3;
+  if (px - r < 0 || py - r < 0 || px + r > WORLD_PX || py + r > WORLD_PY) return true;
+  var x0 = Math.floor((px - r) / TILE), x1 = Math.floor((px + r) / TILE);
+  var y0 = Math.floor((py - r) / TILE), y1 = Math.floor((py + r) / TILE);
+  for (var ty = y0; ty <= y1; ty++) {
+    for (var tx = x0; tx <= x1; tx++) {
+      if (!inBounds(tx, ty)) continue;
+      var ti = idx(tx, ty);
+      if (solid[ti]) {
+        if (trees[ti] || stumps[ti] || palms[ti] || pines[ti]) {
+          // only the trunk / stump core is solid — you can slip under leaves
+          var tcx = tx * TILE + TILE / 2, tcy = ty * TILE + TILE / 2;
+          var trad = trees[ti] ? 7 * treeScale(tx, ty) : (pines[ti] ? 4 * pineScale(tx, ty) : (stumps[ti] ? 7 * stumpScale(tx, ty) : 5 * palmScale(tx, ty)));
+          var tdx = px - tcx, tdy = py - tcy, trr = r + trad;
+          if (tdx * tdx + tdy * tdy < trr * trr) return true;
+        } else {
+          // circle vs tile rect
+          var nx = Math.max(tx * TILE, Math.min(px, tx * TILE + TILE));
+          var ny = Math.max(ty * TILE, Math.min(py, ty * TILE + TILE));
+          var dx = px - nx, dy = py - ny;
+          if (dx * dx + dy * dy < r * r) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Safety net: if the player ever ends up inside something solid
+// (lag spike, edge case), push them back out to its surface.
+function resolveSolids() {
+  var r = player.r - 3;
+  for (var iter = 0; iter < 6; iter++) {
+    var best = 0, bx = 0, by = 0;
+    var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+    for (var ty = pty - 1; ty <= pty + 1; ty++) {
+      for (var tx = ptx - 1; tx <= ptx + 1; tx++) {
+        if (!inBounds(tx, ty)) continue;
+        var ti = idx(tx, ty);
+        if (!solid[ti]) continue;
+        var ox = 0, oy = 0, ov = 0;
+        if (trees[ti] || stumps[ti] || palms[ti] || pines[ti]) {
+          var trad = trees[ti] ? 7 * treeScale(tx, ty) : (pines[ti] ? 4 * pineScale(tx, ty) : (stumps[ti] ? 7 * stumpScale(tx, ty) : 5 * palmScale(tx, ty)));
+          var cx = tx * TILE + TILE / 2, cy = ty * TILE + TILE / 2;
+          var dx = player.x - cx, dy = player.y - cy;
+          var d = Math.hypot(dx, dy);
+          if (d < r + trad) {
+            ov = r + trad - d;
+            if (d > 0.001) { ox = dx / d * ov; oy = dy / d * ov; }
+            else { ox = ov; oy = 0; }
+          }
+        } else {
+          var rx = tx * TILE, ry = ty * TILE;
+          var nx = Math.max(rx, Math.min(player.x, rx + TILE));
+          var ny = Math.max(ry, Math.min(player.y, ry + TILE));
+          var ex2 = player.x - nx, ey2 = player.y - ny;
+          var ed = Math.hypot(ex2, ey2);
+          if (ed < r) {
+            if (ed > 0.001) { ov = r - ed; ox = ex2 / ed * ov; oy = ey2 / ed * ov; }
+            else {
+              var l = player.x - rx, rr2 = rx + TILE - player.x;
+              var tp = player.y - ry, bt = ry + TILE - player.y;
+              var m2 = Math.min(Math.min(l, rr2), Math.min(tp, bt));
+              ov = m2 + r;
+              if (m2 === l) { ox = -ov; oy = 0; }
+              else if (m2 === rr2) { ox = ov; oy = 0; }
+              else if (m2 === tp) { ox = 0; oy = -ov; }
+              else { ox = 0; oy = ov; }
+            }
+          }
+        }
+        if (ov > best) { best = ov; bx = ox; by = oy; }
+      }
+    }
+    if (best <= 0) break;
+    player.x += bx * 1.01; // tiny overshoot so we never rest exactly on the edge
+    player.y += by * 1.01;
+  }
+  player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
+  player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+}
+
+function update(dt) {
+  var dx = 0, dy = 0;
+  if (keys['a'] || keys['arrowleft']) dx -= 1;
+  if (keys['d'] || keys['arrowright']) dx += 1;
+  if (keys['w'] || keys['arrowup']) dy -= 1;
+  if (keys['s'] || keys['arrowdown']) dy += 1;
+  if (joy.active) { dx += joy.dx; dy += joy.dy; }
+  var len = Math.hypot(dx, dy);
+  if (len > 1) { dx /= len; dy /= len; }
+  if (len > 0.01) { player.fx = dx / (len > 1 ? 1 : len); player.fy = dy / (len > 1 ? 1 : len); }
+  var inWater = isInWater(player.x, player.y);
+  var onIce = isIce(player.x, player.y);
+  var wadePx = player.x, wadePy = player.y;
+  if (onIce) {
+    // Skating: momentum carries you, steering only nudges it. Full speed —
+    // ice is the fast way across, water is the slow way.
+    var want = (keys['shift'] ? 340 : 220);
+    var ik = Math.min(1, dt * 3.5);
+    iceVx += (dx * want - iceVx) * ik;
+    iceVy += (dy * want - iceVy) * ik;
+    var ispeed = Math.hypot(iceVx, iceVy);
+    var isteps = Math.max(1, Math.ceil(ispeed * dt / 6));
+    var isx = iceVx * dt / isteps, isy = iceVy * dt / isteps;
+    for (var ist = 0; ist < isteps; ist++) {
+      if (!hitsSolid(player.x + isx, player.y)) player.x += isx;
+      else iceVx = 0;
+      if (!hitsSolid(player.x, player.y + isy)) player.y += isy;
+      else iceVy = 0;
+    }
+  } else {
+    iceVx = 0; iceVy = 0;
+    var speed = (keys['shift'] ? 340 : 220) * (inWater ? 0.5 : 1) * dt;
+    // sub-steps so fast sprints can never jump over thin barriers
+    var steps = Math.max(1, Math.ceil(speed / 6));
+    var sx = dx * speed / steps, sy = dy * speed / steps;
+    for (var st = 0; st < steps; st++) {
+      var nx = player.x + sx;
+      if (!hitsSolid(nx, player.y)) player.x = nx;
+      var ny = player.y + sy;
+      if (!hitsSolid(player.x, ny)) player.y = ny;
+    }
+  }
+  player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
+  player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+  resolveSolids();
+
+  // Splashes: little ripples while you actually move through water
+  var wadeMoved = Math.hypot(player.x - wadePx, player.y - wadePy);
+  if (wadeMoved > 1 && isInWater(player.x, player.y) && !isIce(player.x, player.y)) {
+    splashT += dt;
+    while (splashT > 0.12) {
+      splashT -= 0.12;
+      splashes.push({
+        x: player.x - player.fx * 6 + (Math.random() - 0.5) * 12,
+        y: player.y - player.fy * 6 + (Math.random() - 0.5) * 12,
+        age: 0,
+        life: 0.5 + Math.random() * 0.2,
+        maxR: 9 + Math.random() * 5
+      });
+    }
+    if (splashes.length > 60) splashes.splice(0, splashes.length - 60);
+  } else {
+    splashT = 0;
+  }
+  for (var spi = splashes.length - 1; spi >= 0; spi--) {
+    splashes[spi].age += dt;
+    if (splashes[spi].age >= splashes[spi].life) splashes.splice(spi, 1);
+  }
+
+  // Berries regrow over time (mope.io style)
+  for (var bi = 0; bi < W * H; bi++) {
+    if (bushes[bi] && berryN[bi] < 3) {
+      berryT[bi] += dt;
+      if (berryT[bi] > 20) { berryN[bi]++; berryT[bi] = 0; }
+    }
+    if (stumps[bi] && mushN[bi] < 3) {
+      mushT[bi] += dt;
+      if (mushT[bi] > 20) { mushN[bi]++; mushT[bi] = 0; }
+    }
+  }
+  // Munch berries by touching a bush
+  eatCd = Math.max(0, eatCd - dt);
+  if (eatCd <= 0) {
+    var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+    for (var ey = pty - 1; ey <= pty + 1 && eatCd <= 0; ey++) {
+      for (var ex = ptx - 1; ex <= ptx + 1; ex++) {
+        if (!inBounds(ex, ey)) continue;
+        var ei = idx(ex, ey);
+        if (!bushes[ei] || !berryN[ei]) continue;
+        var bcx = (ex + 0.5) * TILE, bcy = (ey + 0.5) * TILE;
+        var bdx = player.x - bcx, bdy = player.y - bcy;
+        if (bdx * bdx + bdy * bdy < (player.r + 15) * (player.r + 15)) {
+          berryN[ei]--;
+          if (berryN[ei] < 3 && berryT[ei] > 20) berryT[ei] = 0;
+          if (!berryN[ei]) berryT[ei] = 0;
+          score++;
+          eatCd = 0.25;
+          berriesEl.textContent = '🫐 Berries: ' + score;
+          break;
+        }
+      }
+    }
+  }
+  // Munch mushrooms growing on fallen logs and stumps
+  if (eatCd <= 0) {
+    for (var my = pty - 1; my <= pty + 1 && eatCd <= 0; my++) {
+      for (var mx = ptx - 1; mx <= ptx + 1; mx++) {
+        if (!inBounds(mx, my)) continue;
+        var mi = idx(mx, my);
+        if (!stumps[mi] || !mushN[mi]) continue;
+        for (var mk = 0; mk < mushN[mi]; mk++) {
+          var mp = shroomPos(mx, my, mk);
+          var mdx = player.x - mp.x, mdy = player.y - mp.y;
+          if (mdx * mdx + mdy * mdy < (player.r + 10) * (player.r + 10)) {
+            mushN[mi]--;
+            if (!mushN[mi]) mushT[mi] = 0;
+            mushScore++;
+            eatCd = 0.25;
+            shroomsEl.textContent = '🍄 Mushrooms: ' + mushScore;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  var viewW = vw / ZOOM, viewH = vh / ZOOM;
+  cam.x = Math.max(0, Math.min(WORLD_PX - viewW, player.x - viewW / 2));
+  cam.y = Math.max(0, Math.min(WORLD_PY - viewH, player.y - viewH / 2));
+
+  // Hiding: all the way under a canopy (hugging the trunk) conceals you
+  var hiding = false;
+  var htx = Math.floor(player.x / TILE), hty = Math.floor(player.y / TILE);
+  for (var hy = hty - 1; hy <= hty + 1 && !hiding; hy++) {
+    for (var hx = htx - 1; hx <= htx + 1; hx++) {
+      if (!inBounds(hx, hy) || !trees[idx(hx, hy)]) continue;
+      var hsc = treeScale(hx, hy);
+      var hdx = player.x - (hx + 0.5) * TILE, hdy = player.y - (hy + 0.5) * TILE;
+      var hr = 16 + 7 * hsc;
+      if (hdx * hdx + hdy * hdy < hr * hr) { hiding = true; break; }
+    }
+  }
+  // Hiding under a palm: hugging the trunk conceals you too
+  if (!hiding) {
+    for (var gay = hty - 1; gay <= hty + 1 && !hiding; gay++) {
+      for (var gax = htx - 1; gax <= htx + 1; gax++) {
+        if (!inBounds(gax, gay) || !palms[idx(gax, gay)]) continue;
+        var gsc = palmScale(gax, gay);
+        var gdx = player.x - (gax + 0.5) * TILE, gdy = player.y - (gay + 0.5) * TILE;
+        var gr = 16 + 7 * gsc;
+        if (gdx * gdx + gdy * gdy < gr * gr) { hiding = true; break; }
+      }
+    }
+  }
+  // Hiding under a pine works just like a regular tree
+  if (!hiding) {
+    for (var niy = hty - 1; niy <= hty + 1 && !hiding; niy++) {
+      for (var nix = htx - 1; nix <= htx + 1; nix++) {
+        if (!inBounds(nix, niy) || !pines[idx(nix, niy)]) continue;
+        var nsc = pineScale(nix, niy);
+        var ndx = player.x - (nix + 0.5) * TILE, ndy = player.y - (niy + 0.5) * TILE;
+        var nr = 16 + 7 * nsc;
+        if (ndx * ndx + ndy * ndy < nr * nr) { hiding = true; break; }
+      }
+    }
+  }
+  // Hiding in a bush: fully inside big foliage conceals you too
+  if (!hiding) {
+    for (var by = hty - 1; by <= hty + 1 && !hiding; by++) {
+      for (var bx = htx - 1; bx <= htx + 1; bx++) {
+        if (!inBounds(bx, by) || !bushes[idx(bx, by)]) continue;
+        var bsc = bushScale(bx, by);
+        var bdx = player.x - (bx + 0.5) * TILE, bdy = player.y - (by + 0.5) * TILE;
+        if (Math.hypot(bdx, bdy) < 14 * bsc - player.r) { hiding = true; break; }
+      }
+    }
+  }
+  playerA += ((hiding ? 0.15 : 1) - playerA) * Math.min(1, dt * 8);
+  if (hiding !== wasHiding) {
+    wasHiding = hiding;
+    hiddenEl.style.display = hiding ? 'block' : 'none';
+  }
+  // Beach crabs: rarely pop out of their holes, skitter around, duck back in
+  for (var chi = 0; chi < crabHoles.length; chi++) {
+    var ch = crabHoles[chi];
+    if (ch.state === 'hidden') {
+      ch.timer -= dt;
+      if (ch.timer <= 0) {
+        ch.state = 'out';
+        ch.timer = 4 + Math.random() * 2;
+        ch.cx = ch.x; ch.cy = ch.y;
+        ch.pause = 0;
+        crabDart(ch);
+      }
+      continue;
+    }
+    var cdx = ch.tx - ch.cx, cdy = ch.ty - ch.cy;
+    var cdd = Math.hypot(cdx, cdy);
+    if (ch.state === 'return' && cdd < 5) {
+      ch.state = 'hidden';
+      ch.timer = 25 + Math.random() * 35;
+      continue;
+    }
+    if (ch.pause > 0) { ch.pause -= dt; }
+    else if (cdd > 1) {
+      var cspeed = ch.state === 'return' ? 170 : 150;
+      var cmove = Math.min(cdd, cspeed * dt);
+      var stepx = cdx / cdd * cmove, stepy = cdy / cdd * cmove;
+      var wtx = Math.floor((ch.cx + stepx) / TILE), wty = Math.floor((ch.cy + stepy) / TILE);
+      var wb = inBounds(wtx, wty) ? biome[idx(wtx, wty)] : OCEAN;
+      if (wb === WATER || wb === OCEAN) {
+        // water ahead: turn and skitter along the shore instead
+        var baseA = Math.atan2(cdy, cdx);
+        var turned = false;
+        for (var ta = 0; ta < 4 && !turned; ta++) {
+          var aa = baseA + (ta % 2 ? -1 : 1) * (0.9 + (ta >> 1) * 0.9);
+          var kx = ch.cx + Math.cos(aa) * cmove, ky = ch.cy + Math.sin(aa) * cmove;
+          var ktx = Math.floor(kx / TILE), kty = Math.floor(ky / TILE);
+          var kb = inBounds(ktx, kty) ? biome[idx(ktx, kty)] : OCEAN;
+          if (kb !== WATER && kb !== OCEAN) {
+            ch.cx = kx; ch.cy = ky;
+            ch.heading = aa;
+            turned = true;
+          }
+        }
+        if (ch.state === 'out') { ch.pause = 0.3; crabDart(ch); }
+      } else {
+        ch.cx += stepx;
+        ch.cy += stepy;
+        var want = Math.atan2(cdy, cdx);
+        var cdh = want - ch.heading;
+        while (cdh > Math.PI) cdh -= Math.PI * 2;
+        while (cdh < -Math.PI) cdh += Math.PI * 2;
+        ch.heading += cdh * Math.min(1, dt * 10);
+      }
+    } else if (ch.state === 'out') {
+      ch.pause = 0.25 + Math.random() * 0.5;
+      crabDart(ch);
+    }
+    if (ch.state === 'out') {
+      ch.timer -= dt;
+      if (ch.timer <= 0) { ch.state = 'return'; ch.tx = ch.x; ch.ty = ch.y; }
+    }
+  }
+  // Fish: slow wander around their water, keeping clear of the shores.
+  // Pond fish stick to WATER, ocean fish to the OCEAN (fh.sea).
+  function fishWater(pax, pay, sea) {
+    var ftx = Math.floor(pax / TILE), fty = Math.floor(pay / TILE);
+    if (!inBounds(ftx, fty)) return false;
+    return biome[idx(ftx, fty)] === (sea ? OCEAN : WATER);
+  }
+  for (var fxi = 0; fxi < fishes.length; fxi++) {
+    var fh = fishes[fxi];
+    fh.turn -= dt;
+    var fstep = fh.speed * dt;
+    var fpd = fstep + 28; // look well ahead so they turn before nearing a shore
+    var fAhead = fishWater(fh.x + Math.cos(fh.heading) * fpd, fh.y + Math.sin(fh.heading) * fpd, fh.sea);
+    var fLeft = fishWater(fh.x + Math.cos(fh.heading - 0.6) * fpd, fh.y + Math.sin(fh.heading - 0.6) * fpd, fh.sea);
+    var fRight = fishWater(fh.x + Math.cos(fh.heading + 0.6) * fpd, fh.y + Math.sin(fh.heading + 0.6) * fpd, fh.sea);
+    if (!fAhead || !fLeft || !fRight) {
+      if (!fLeft && fRight) fh.heading += 0.9 + Math.random() * 0.5;
+      else if (!fRight && fLeft) fh.heading -= 0.9 + Math.random() * 0.5;
+      else fh.heading += Math.PI * (0.6 + Math.random() * 0.6) * (Math.random() < 0.5 ? 1 : -1);
+      fh.turn = 0.4 + Math.random() * 0.8;
+    } else {
+      fh.x += Math.cos(fh.heading) * fstep;
+      fh.y += Math.sin(fh.heading) * fstep;
+      if (fh.turn <= 0 && Math.random() < dt * 0.5) {
+        fh.heading += (Math.random() - 0.5) * 1.2;
+        fh.turn = 1 + Math.random() * 2;
+      }
+    }
+  }
+  // Ducks: paddle around their pond, sometimes waddle ashore for a bit,
+  // then head back to the water. Chicks grow up, old adults fade away,
+  // nesters raise the next generation. Never more than 50, never fewer
+  // than 25 ducks on the map.
+  for (var dki = ducks.length - 1; dki >= 0; dki--) {
+    var dk = ducks[dki];
+    if (dk.chick) { // chick: toddle near home, stay yellow, grow into an adult (~120s)
+      dk.age += dt;
+      dk.sc = 0.45 + (dk.gsc - 0.45) * Math.min(1, dk.age / 120);
+      dk.timer -= dt;
+      if (dk.timer <= 0) {
+        dk.timer = 2 + Math.random() * 3;
+        dk.tx = dk.nx + (Math.random() - 0.5) * 140;
+        dk.ty = dk.ny + (Math.random() - 0.5) * 140;
+      }
+      var cwater = isInWater(dk.x, dk.y);
+      if (cwater) { dk.lwX = dk.x; dk.lwY = dk.y; }
+      duckStep(dk, dk.tx, dk.ty, cwater ? 26 : 20, dt);
+      if (dk.age >= 120) { // grown up: a fresh adult life begins
+        dk.chick = false; dk.sc = dk.gsc;
+        dk.age = 0; dk.nester = Math.random() < 0.2;
+        if (isInWater(dk.x, dk.y)) { dk.state = 'swim'; dk.timer = 12 + Math.random() * 20; }
+        else { dk.state = 'toWater'; dk.timer = 14; }
+      }
+      continue;
+    }
+    dk.age += dt;
+    if (dk.state !== 'dying' && dk.age >= dk.lifespan) { dk.state = 'dying'; dk.deathT = 0; }
+    if (dk.state === 'dying') { // slowly fade away over ~5 seconds
+      dk.deathT += dt;
+      dk.fade = Math.max(0, 1 - dk.deathT / 5);
+      if (dk.deathT >= 5) {
+        if (dk.nest) {
+          if (!dk.nest.built && !dk.nest.eggs.length) abandonNest(dk); // half-built nest goes too
+          else { dk.nest.mom = null; dk.nest = null; }
+        }
+        ducks.splice(dki, 1);
+      }
+      continue;
+    }
+    if (dk.state === 'swim') {
+      dk.turn -= dt;
+      var dsw = dk.speed * dt, dpd = dsw + 26;
+      var dwA = fishWater(dk.x + Math.cos(dk.heading) * dpd, dk.y + Math.sin(dk.heading) * dpd, 0);
+      var dwL = fishWater(dk.x + Math.cos(dk.heading - 0.6) * dpd, dk.y + Math.sin(dk.heading - 0.6) * dpd, 0);
+      var dwR = fishWater(dk.x + Math.cos(dk.heading + 0.6) * dpd, dk.y + Math.sin(dk.heading + 0.6) * dpd, 0);
+      if (!dwA || !dwL || !dwR) {
+        if (!dwL && dwR) dk.heading += 0.9 + Math.random() * 0.5;
+        else if (!dwR && dwL) dk.heading -= 0.9 + Math.random() * 0.5;
+        else dk.heading += Math.PI * (0.6 + Math.random() * 0.6) * (Math.random() < 0.5 ? 1 : -1);
+        dk.turn = 0.4 + Math.random() * 0.8;
+      } else {
+        dk.x += Math.cos(dk.heading) * dsw;
+        dk.y += Math.sin(dk.heading) * dsw;
+        if (dk.turn <= 0 && Math.random() < dt * 0.5) {
+          dk.heading += (Math.random() - 0.5) * 1.2;
+          dk.turn = 1 + Math.random() * 2;
+        }
+      }
+      dk.lwX = dk.x; dk.lwY = dk.y;
+      dk.wake += dt; // little wake ripples while paddling
+      if (dk.wake > 0.45) {
+        dk.wake = 0;
+        if (splashes.length < 90) splashes.push({ x: dk.x - Math.cos(dk.heading) * 8, y: dk.y - Math.sin(dk.heading) * 8, age: 0, life: 0.4, maxR: 6 + Math.random() * 2 });
+      }
+      dk.timer -= dt;
+      if (dk.timer <= 0) { // time for a stroll: find a nearby shore tile
+        dk.timer = 6; // retry shortly if nothing suitable is near
+        for (var dka = 0; dka < 14; dka++) {
+          var dktx = Math.floor(dk.x / TILE) + Math.round((Math.random() - 0.5) * 10);
+          var dkty = Math.floor(dk.y / TILE) + Math.round((Math.random() - 0.5) * 10);
+          if (!inBounds(dktx, dkty)) continue;
+          var dkti = idx(dktx, dkty);
+          var dkb = biome[dkti];
+          if ((dkb !== GRASS && dkb !== SAND) || snow[dkti] || solid[dkti] || bushes[dkti]) continue;
+          dk.tx = (dktx + 0.5) * TILE; dk.ty = (dkty + 0.5) * TILE;
+          dk.state = 'toLand'; dk.timer = 12;
+          break;
+        }
+      }
+    } else if (dk.state === 'toLand' || dk.state === 'toWater') {
+      var goingOut = dk.state === 'toLand';
+      var gx2 = goingOut ? dk.tx : dk.lwX, gy2 = goingOut ? dk.ty : dk.lwY;
+      var wading = isInWater(dk.x, dk.y);
+      if (wading) { dk.lwX = dk.x; dk.lwY = dk.y; }
+      dk.timer -= dt;
+      if (duckStep(dk, gx2, gy2, wading ? dk.speed : 20, dt)) {
+        if (goingOut) {
+          if (dk.nester && !dk.nest && ducks.length < 50 && Math.random() < 0.6 && buildNest(dk)) {
+            if (pickMaterial(dk)) { dk.state = 'gather'; dk.phase = 'fetch'; dk.timer = 15; }
+            else { // nothing to gather nearby: make do with the bare hollow
+              dk.nest.built = true; dk.nest.progress = dk.nest.need;
+              dk.state = 'laying'; dk.timer = 40; dk.tx = dk.nest.x; dk.ty = dk.nest.y; dk.layT = 0;
+            }
+          } else { dk.state = 'land'; dk.timer = 5 + Math.random() * 6; }
+        }
+        else { dk.state = 'swim'; dk.timer = 12 + Math.random() * 20; }
+      } else if (dk.timer <= 0) {
+        dk.state = 'swim'; dk.timer = 10 + Math.random() * 12;
+      }
+    } else if (dk.state === 'gather') { // fetching sticks + grass for the nest
+      var gtn = dk.nest;
+      if (!gtn || nests.indexOf(gtn) === -1) {
+        dk.nest = null; dk.state = 'toWater'; dk.timer = 14;
+      } else {
+        dk.timer -= dt;
+        if (dk.phase === 'pick') { // grabbing the load
+          if (Math.random() < dt * 6) dk.heading += (Math.random() - 0.5) * 3;
+          if (dk.timer <= 0) { dk.phase = 'return'; dk.timer = 15; dk.tx = gtn.x; dk.ty = gtn.y; }
+        } else if (duckStep(dk, dk.tx, dk.ty, 24, dt)) {
+          if (dk.phase === 'fetch') { dk.phase = 'pick'; dk.timer = 1.2; }
+          else { // 'return': drop the load on the nest
+            gtn.progress++;
+            if (gtn.progress >= gtn.need) { // nest built: sit on it, lay the clutch
+              gtn.built = true;
+              dk.state = 'laying'; dk.timer = 40; dk.tx = gtn.x; dk.ty = gtn.y; dk.layT = 0;
+            } else if (!pickMaterial(dk)) { // nowhere left to gather: make do
+              gtn.built = true;
+              dk.state = 'laying'; dk.timer = 40; dk.tx = gtn.x; dk.ty = gtn.y; dk.layT = 0;
+            } else { dk.phase = 'fetch'; dk.timer = 15; }
+          }
+        } else if (dk.timer <= 0) { // couldn't get there: give up on this nest
+          abandonNest(dk);
+          dk.state = 'toWater'; dk.timer = 14;
+        }
+      }
+    } else if (dk.state === 'laying') { // sitting on the nest, laying eggs
+      duckStep(dk, dk.tx, dk.ty, 20, dt);
+      var layNest = dk.nest;
+      if (!layNest || nests.indexOf(layNest) === -1) {
+        dk.nest = null; dk.state = 'toWater'; dk.timer = 14;
+      } else {
+        dk.layT += dt;
+        if (dk.layT >= 8 && layNest.eggs.length < layNest.clutch && ducks.length < 50) {
+          dk.layT = 0;
+          layNest.eggs.push(0);
+        }
+        dk.timer -= dt;
+        if (layNest.eggs.length >= layNest.clutch || dk.timer <= 0) { dk.state = 'toWater'; dk.timer = 14; }
+      }
+    } else { // 'land': have a sit and look around, then waddle back
+      dk.timer -= dt;
+      if (Math.random() < dt * 0.4) dk.heading += (Math.random() - 0.5) * 1.5;
+      if (dk.timer <= 0) { dk.state = 'toWater'; dk.timer = 14; }
+    }
+  }
+  // Nests: eggs hatch over time (when there is room); empty old nests go
+  for (var nti = nests.length - 1; nti >= 0; nti--) {
+    var nst = nests[nti];
+    nst.age += dt;
+    for (var neg = nst.eggs.length - 1; neg >= 0; neg--) {
+      nst.eggs[neg] += dt;
+      if (nst.eggs[neg] > 60 && ducks.length < 50) { // hatch after ~60s
+        nst.eggs.splice(neg, 1);
+        hatchChick(nst);
+      }
+    }
+    if (!nst.eggs.length && nst.age > 150) {
+      if (nst.mom) nst.mom.nest = null;
+      nests.splice(nti, 1);
+    }
+  }
+  // Never fewer than 25 ducks: newcomers paddle straight into open ponds
+  duckCheckT += dt;
+  if (duckCheckT > 1) {
+    duckCheckT = 0;
+    while (ducks.length < 25 && duckSpots.length) {
+      var mspot = duckSpots[(Math.random() * duckSpots.length) | 0];
+      spawnDuck((mspot % W + 0.5) * TILE, (((mspot / W) | 0) + 0.5) * TILE);
+    }
+  }
+  // Bunnies: hop around the fields, raid berry bushes, visit home burrows.
+  // Babies grow up, old ones fade away after 3 minutes. Between 20 and
+  // 50 bunnies on the map.
+  for (var bki = bunnies.length - 1; bki >= 0; bki--) {
+    var bn = bunnies[bki];
+    if (bn.baby) { // growing up
+      bn.age += dt;
+      bn.sc = 0.5 + (bn.gsc - 0.5) * Math.min(1, bn.age / 60);
+      if (bn.age >= 60) { bn.baby = false; bn.age = 0; } // grown: a fresh 3 minutes begins
+    } else {
+      bn.age += dt;
+      if (bn.state !== 'dying' && bn.age >= bn.lifespan) { bn.state = 'dying'; bn.deathT = 0; }
+    }
+    if (bn.state === 'dying') { // slowly fade away over ~5 seconds
+      bn.deathT += dt;
+      bn.fade = Math.max(0, 1 - bn.deathT / 5);
+      if (bn.deathT >= 5) bunnies.splice(bki, 1);
+      continue;
+    }
+    if (bn.state === 'hop') {
+      bn.timer -= dt; bn.craveT -= dt; bn.homeT -= dt;
+      if (bn.timer <= 0) {
+        if (bn.resting) {
+          bn.resting = false;
+          bn.heading = Math.random() * Math.PI * 2;
+          bn.timer = 0.3 + Math.random() * 0.5;
+          if (bn.craveT <= 0) { // hungry: go find berries
+            bn.craveT = 15 + Math.random() * 20;
+            var tgtB = findBerryBush(bn);
+            if (tgtB !== -1) {
+              bn.btx = tgtB % W; bn.bty = ((tgtB / W) | 0);
+              bn.state = 'toBush'; bn.timer = 10;
+            }
+          } else if (bn.homeT <= 0 && bn.home) { // homesick: visit the burrow
+            bn.homeT = 35 + Math.random() * 35;
+            bn.state = 'toHome'; bn.timer = 15;
+          } else if (bn.baby && bn.home && Math.hypot(bn.x - bn.home.x, bn.y - bn.home.y) > 70) {
+            bn.heading = Math.atan2(bn.home.y - bn.y, bn.home.x - bn.x); // babies stay near home
+          }
+        } else {
+          bn.resting = true;
+          bn.timer = 0.4 + Math.random() * 1.1;
+        }
+      }
+      if (bn.state === 'hop' && !bn.resting) {
+        if (!bunnyHop(bn, bn.baby ? 60 : 95, dt)) {
+          bn.heading = Math.random() * Math.PI * 2;
+          bn.resting = true;
+          bn.timer = 0.5;
+        }
+      }
+    } else if (bn.state === 'toBush') {
+      var bbi = idx(bn.btx, bn.bty);
+      bn.timer -= dt;
+      if (!bushes[bbi] || !berryN[bbi]) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5; }
+      else {
+        bn.heading = Math.atan2((bn.bty + 0.5) * TILE - bn.y, (bn.btx + 0.5) * TILE - bn.x);
+        var bbdx = (bn.btx + 0.5) * TILE - bn.x, bbdy = (bn.bty + 0.5) * TILE - bn.y;
+        if (bbdx * bbdx + bbdy * bbdy < 16 * 16) {
+          bn.state = 'nibble'; bn.timer = 4 + Math.random() * 3; bn.nibT = 0;
+        } else {
+          bunnyHop(bn, 80, dt);
+          if (bn.timer <= 0) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5; }
+        }
+      }
+    } else if (bn.state === 'nibble') { // munching berries, same regrow rules as you
+      var nbi = idx(bn.btx, bn.bty);
+      bn.timer -= dt; bn.nibT += dt;
+      bn.heading = Math.atan2((bn.bty + 0.5) * TILE - bn.y, (bn.btx + 0.5) * TILE - bn.x);
+      if (bushes[nbi] && berryN[nbi] && bn.nibT >= 1.2) {
+        bn.nibT = 0;
+        berryN[nbi]--;
+        if (berryN[nbi] < 3 && berryT[nbi] > 20) berryT[nbi] = 0;
+        if (!berryN[nbi]) berryT[nbi] = 0;
+      }
+      if (bn.timer <= 0 || !bushes[nbi] || !berryN[nbi]) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5 + Math.random(); }
+    } else if (bn.state === 'toHome') {
+      bn.timer -= dt;
+      if (!bn.home) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5; }
+      else {
+        bn.heading = Math.atan2(bn.home.y - bn.y, bn.home.x - bn.x);
+        var hmdx = bn.home.x - bn.x, hmdy = bn.home.y - bn.y;
+        if (hmdx * hmdx + hmdy * hmdy < 10 * 10) { bn.state = 'inside'; bn.timer = 5 + Math.random() * 5; }
+        else {
+          bunnyHop(bn, 80, dt);
+          if (bn.timer <= 0) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5; }
+        }
+      }
+    } else { // 'inside': cozy in the burrow, then pop back out
+      bn.timer -= dt;
+      if (bn.timer <= 0) {
+        if (bn.home) { bn.x = bn.home.x; bn.y = bn.home.y; }
+        bn.state = 'hop'; bn.resting = true; bn.timer = 0.5;
+      }
+    }
+  }
+  // Burrows: every so often 1-2 new babies pop out (max 50 bunnies)
+  for (var bwi = 0; bwi < burrows.length; bwi++) {
+    var bw = burrows[bwi];
+    bw.breedT -= dt;
+    if (bw.breedT <= 0) {
+      bw.breedT = 50 + Math.random() * 40;
+      if (bunnies.length < 50) {
+        var nb2 = 1 + ((Math.random() * 2) | 0);
+        while (nb2-- > 0 && bunnies.length < 50) spawnBunny(bw, true);
+      }
+    }
+  }
+  // Never fewer than 20 bunnies: newcomers move into existing burrows
+  bunCheckT += dt;
+  if (bunCheckT > 1) {
+    bunCheckT = 0;
+    while (bunnies.length < 20 && burrows.length) {
+      spawnBunny(burrows[(Math.random() * burrows.length) | 0], false);
+    }
+  }
+  coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
+}
+
+// ---------- Drawing ----------
+function shade(base, amt) {
+  return 'rgb(' + Math.max(0, Math.min(255, base[0] + amt)) + ',' +
+         Math.max(0, Math.min(255, base[1] + amt)) + ',' +
+         Math.max(0, Math.min(255, base[2] + amt)) + ')';
+}
+var C_OCEAN = [22, 68, 150], C_WATER = [52, 152, 219], C_LAKE = [32, 110, 185],
+    C_SAND = [238, 220, 130], C_GRASS = [62, 172, 100], C_GRASS_DARK = [46, 148, 82],
+    C_SNOW = [232, 240, 248];
+
+function drawTree(sx, sy, tx, ty, leafAlpha, trunkAlpha) {
+  // Top-down canopy seen from directly above: leaves only.
+  // Trunk is just a circle in the middle, shown only when under the tree.
+  // Every tree gets its own size (1x - 1.35x) and slight look.
+  var sc = treeScale(tx, ty);
+  var pal = (hash2(tx, ty, 43) * 3) | 0;
+  var dark = pal === 2 ? '#0f4d2e' : (pal === 1 ? '#174d1f' : '#14521f');
+  var mid = pal === 2 ? '#1b7a3d' : (pal === 1 ? '#237a35' : '#1e6b2e');
+  var light = pal === 2 ? '#43b953' : (pal === 1 ? '#37ad4c' : '#2fa143');
+  function j(s) { return (hash2(tx, ty, s) - 0.5) * 7; }
+  function blob(dx, dy, r, c) {
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.arc(sx + dx * sc, sy + dy * sc, r * sc, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1; // ground shadow stays even when leaves fade
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(sx + 4 * sc, sy + 7 * sc, 19 * sc, 8 * sc, 0, 0, 7); ctx.fill();
+  ctx.globalAlpha = leafAlpha;
+  blob(-11 + j(51), -2 + j(52), 13, dark);
+  blob(11 + j(53), -2 + j(54), 13, dark);
+  blob(j(55), -12 + j(56), 14, dark);
+  blob(j(57), 9 + j(58), 13, dark);
+  blob(-7 + j(59), -5 + j(60), 10, mid);
+  blob(8 + j(61), -6 + j(62), 10, mid);
+  blob(j(63), 3 + j(64), 10, mid);
+  blob(-4 + j(65), -9 + j(66), 5, light);
+  blob(6 + j(67), 1 + j(68), 4, light);
+  if (hash2(tx, ty, 69) < 0.5) blob(2 + j(70), -14 + j(71), 7, mid);
+  // the log only shows when you are under the tree
+  if (trunkAlpha > 0.01) {
+    ctx.globalAlpha = trunkAlpha;
+    ctx.fillStyle = '#8a5a33';
+    ctx.strokeStyle = '#5d3a1a';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(sx, sy, 6 * sc, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawPine(sx, sy, tx, ty, leafAlpha, trunkAlpha) {
+  // Snowy evergreen seen from above: three stacked triangular layers with
+  // snow-dusted rims and a snowy cap. Trunk shows only when under it.
+  var sc = pineScale(tx, ty);
+  var rot = hash2(tx, ty, 622) * Math.PI * 2;
+  function tri(cx, cy, r, a, fill) {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    for (var k = 0; k < 3; k++) {
+      var va = a + k * (Math.PI * 2 / 3);
+      var vx = cx + Math.cos(va) * r, vy = cy + Math.sin(va) * r;
+      if (!k) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  function rim(cx, cy, r, a) {
+    ctx.strokeStyle = 'rgba(240,246,252,0.9)';
+    ctx.lineWidth = 2.2 * sc;
+    ctx.beginPath();
+    for (var k = 0; k < 3; k++) {
+      var va = a + k * (Math.PI * 2 / 3);
+      var vx = cx + Math.cos(va) * r, vy = cy + Math.sin(va) * r;
+      if (!k) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+    }
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.globalAlpha = 1; // ground shadow stays even when leaves fade
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(sx + 4 * sc, sy + 7 * sc, 17 * sc, 7 * sc, 0, 0, 7); ctx.fill();
+  ctx.globalAlpha = leafAlpha;
+  var lx = (hash2(tx, ty, 623) - 0.5) * 8 * sc, ly = (hash2(tx, ty, 624) - 0.5) * 8 * sc;
+  tri(sx + lx * 0.4, sy + ly * 0.4, 16 * sc, rot, '#0e3d24');
+  rim(sx + lx * 0.4, sy + ly * 0.4, 16 * sc, rot);
+  tri(sx + lx * 0.7, sy + ly * 0.7, 11.5 * sc, rot + 0.15, '#155c33');
+  rim(sx + lx * 0.7, sy + ly * 0.7, 11.5 * sc, rot + 0.15);
+  tri(sx + lx, sy + ly, 7 * sc, rot + 0.3, '#1e7a44');
+  // snowy cap + a few snow blobs on the boughs
+  tri(sx + lx, sy + ly, 3.6 * sc, rot + 0.3, '#eef4fb');
+  ctx.fillStyle = '#eef4fb';
+  for (var s = 0; s < 3; s++) {
+    var sa = rot + hash2(tx + s * 5, ty + s * 9, 625) * Math.PI * 2;
+    var sr = (8 + hash2(tx + s * 11, ty + s * 7, 626) * 6) * sc;
+    ctx.beginPath(); ctx.arc(sx + Math.cos(sa) * sr, sy + Math.sin(sa) * sr, 2.2 * sc, 0, 7); ctx.fill();
+  }
+  // the trunk only shows when you are under the pine (slim, like a real pine)
+  if (trunkAlpha > 0.01) {
+    ctx.globalAlpha = trunkAlpha;
+    ctx.fillStyle = '#8a5a33';
+    ctx.strokeStyle = '#5d3a1a';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx, sy, 3 * sc, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawPalm(sx, sy, tx, ty, leafAlpha, trunkAlpha) {
+  // Coconut palm seen from above: leaning trunk with a star of long fronds
+  // and a cluster of coconuts. Fronds fade when you slip underneath, and
+  // the trunk ring shows — just like regular trees.
+  var sc = palmScale(tx, ty);
+  var lx = (hash2(tx, ty, 302) - 0.5) * 6 * sc;
+  var ly = (hash2(tx, ty, 303) - 0.5) * 6 * sc;
+  var cx = sx + lx, cy = sy + ly;
+  ctx.globalAlpha = 1; // ground shadow stays even when fronds fade
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(sx + 3 * sc, sy + 6 * sc, 14 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+  // trunk: slim stem leaning from base to crown
+  ctx.strokeStyle = '#5d3a1a';
+  ctx.lineWidth = 5 * sc;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+  ctx.strokeStyle = '#a06a3b';
+  ctx.lineWidth = 2.5 * sc;
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+  ctx.lineCap = 'butt';
+  // fronds: long tapered leaves radiating from the crown
+  ctx.globalAlpha = leafAlpha;
+  var rot = hash2(tx, ty, 304) * Math.PI * 2;
+  var NF = 7;
+  for (var f = 0; f < NF; f++) {
+    var fa = rot + f * (Math.PI * 2 / NF) + (hash2(tx + f * 3, ty + f * 5, 305) - 0.5) * 0.5;
+    var fl = (20 + hash2(tx + f * 7, ty + f * 11, 306) * 9) * sc;
+    var dark = (f % 2 === 0);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(fa);
+    ctx.fillStyle = dark ? '#2e8b47' : '#3fa655';
+    ctx.beginPath(); ctx.ellipse(fl * 0.45, 0, fl * 0.52, 5.5 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = dark ? '#3aa655' : '#55bd6b';
+    ctx.beginPath(); ctx.ellipse(fl * 0.45, 0, fl * 0.32, 2.8 * sc, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // coconuts clustered at the crown
+  var nc = 2 + ((hash2(tx, ty, 310) * 2) | 0); // 2-3 nuts
+  for (var cn = 0; cn < nc; cn++) {
+    var ca = rot + hash2(tx + cn * 13, ty + cn * 17, 311) * Math.PI * 2;
+    var cr = 4 * sc + hash2(tx + cn * 7, ty + cn * 9, 312) * 3 * sc;
+    var nx = cx + Math.cos(ca) * cr, ny = cy + Math.sin(ca) * cr;
+    ctx.fillStyle = '#6b4a2b';
+    ctx.beginPath(); ctx.arc(nx, ny, 2.8 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#a37c4e';
+    ctx.beginPath(); ctx.arc(nx - 0.8 * sc, ny - 0.8 * sc, 1.1 * sc, 0, 7); ctx.fill();
+  }
+  // the trunk ring only shows when you are under the palm
+  if (trunkAlpha > 0.01) {
+    ctx.globalAlpha = trunkAlpha;
+    ctx.fillStyle = '#8a5a33';
+    ctx.strokeStyle = '#5d3a1a';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx, sy, 4 * sc, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawBush(sx, sy, tx, ty, n, alpha) {
+  // Every bush gets its own size and slight look; fades when you're inside
+  var sc = bushScale(tx, ty);
+  ctx.globalAlpha = 1; // soft ground shadow stays even when faded
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 9 * sc, 11 * sc, 4.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+  var pal = (hash2(tx, ty, 85) * 3) | 0;
+  var base = pal === 2 ? '#2a8a3e' : (pal === 1 ? '#37ad4c' : '#2f9e44');
+  var dark = '#1d6b2c';
+  function j(s) { return (hash2(tx, ty, s) - 0.5) * 6; }
+  function puff(dx, dy, r) {
+    ctx.fillStyle = base;
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(sx + dx * sc, sy + dy * sc, r * sc, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  puff(-6 + j(87), 3 + j(88), 8);
+  puff(6 + j(89), 3 + j(90), 8);
+  puff(j(91), -4 + j(92), 9);
+  if (hash2(tx, ty, 93) < 0.5) puff(3 + j(94), 6 + j(95), 6);
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.arc(sx - 3 * sc, sy - 6 * sc, 3 * sc, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1; // berries stay fully visible even when the bush fades
+  ctx.fillStyle = '#e1306c';
+  ctx.strokeStyle = '#a3123f';
+  ctx.lineWidth = 1.5;
+  for (var k = 0; k < n; k++) {
+    var a = hash2(tx + k * 13, ty + k * 29, 77) * Math.PI * 2;
+    var bx = sx + Math.cos(a) * 8 * sc, by = sy - 1 + Math.sin(a) * 7 * sc;
+    ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  if (snow[idx(tx, ty)]) { // snow-dusted top on bushes up in the snow
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.fillStyle = 'rgba(242,247,252,0.95)';
+    ctx.beginPath(); ctx.arc(sx + j(96), sy - 7 * sc, 6 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx + 5 * sc, sy - 2 * sc, 3.5 * sc, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawStump(sx, sy, tx, ty) {
+  // Old stump seen from above: bark ring around wood with growth rings
+  var sc = stumpScale(tx, ty);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 9 * sc, 10 * sc, 4 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#6b4a2b';
+  ctx.strokeStyle = '#4a2f18';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(sx, sy, 11 * sc, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#c9a06a';
+  ctx.beginPath(); ctx.arc(sx, sy, 7.5 * sc, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#a37c4e';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(sx, sy, 5 * sc, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx, sy, 2.8 * sc, 0, 7); ctx.stroke();
+  var ca = hash2(tx, ty, 113) * Math.PI * 2;
+  ctx.strokeStyle = '#6b4a2b';
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(sx + Math.cos(ca) * 7 * sc, sy + Math.sin(ca) * 7 * sc);
+  ctx.stroke();
+  var sn = mushN[idx(tx, ty)];
+  for (var q = 0; q < sn; q++) {
+    var sp = shroomPos(tx, ty, q);
+    drawShroom(sp.x, sp.y, mushScale(tx, ty, q));
+  }
+}
+function drawShroom(x, y, s) {
+  s = s || 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(x, y + 3.5 * s, 3.6 * s, 1.6 * s, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f5ead2';
+  ctx.strokeStyle = '#cbb98f';
+  ctx.lineWidth = 1 * s;
+  ctx.beginPath(); ctx.arc(x, y + 1 * s, 2.6 * s, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#8e1f16';
+  ctx.beginPath(); ctx.arc(x, y - 1 * s, 4.4 * s, 0, 7); ctx.fill();
+  ctx.fillStyle = '#d63d2f';
+  ctx.beginPath(); ctx.arc(x, y - 1.4 * s, 3.6 * s, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ef6c5c';
+  ctx.beginPath(); ctx.arc(x - 0.8 * s, y - 2.4 * s, 1.8 * s, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x - 1.6 * s, y - 1.6 * s, 1 * s, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 1.4 * s, y - 2.2 * s, 0.8 * s, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 0.4 * s, y + 0.2 * s, 0.7 * s, 0, 7); ctx.fill();
+}
+function drawCrab(h, t) {
+  var wig = Math.sin(t / 90) * 1.2;
+  ctx.save();
+  ctx.translate(h.cx, h.cy);
+  ctx.rotate(h.heading);
+  ctx.strokeStyle = '#a93226';
+  ctx.lineWidth = 1.5;
+  for (var l = -1; l <= 1; l++) {
+    ctx.beginPath(); ctx.moveTo(l * 3, -3); ctx.lineTo(l * 4 + wig, -7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(l * 3, 3); ctx.lineTo(l * 4 - wig, 7); ctx.stroke();
+  }
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath(); ctx.arc(7, -4, 2.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(7, 4, 2.5, 0, 7); ctx.fill();
+  ctx.fillStyle = '#c0392b';
+  ctx.strokeStyle = '#7b241c';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, 6, 4.5, 0, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(4.5, -2, 1.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(4.5, 2, 1.4, 0, 7); ctx.fill();
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.arc(5, -2, 0.7, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(5, 2, 0.7, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function drawDuck(dk) {
+  // Top-down duck: tail, round body with a wing patch, head with beak and
+  // eyes. Feet paddle out when ashore. Size and colors vary per duck.
+  var sc = dk.sc;
+  ctx.save();
+  ctx.translate(dk.x, dk.y);
+  ctx.rotate(dk.heading);
+  ctx.globalAlpha = dk.fade;
+  if (dk.chick) { // fluffy yellow chick, still growing
+    ctx.fillStyle = dk.state === 'swim' ? 'rgba(10,40,80,0.25)' : 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(0, 1 * sc, 7 * sc, 5 * sc, 0, 0, 7); ctx.fill();
+    if (dk.state !== 'swim') {
+      ctx.fillStyle = '#e8912d';
+      ctx.beginPath(); ctx.ellipse(-1 * sc, -5 * sc, 2.4 * sc, 1.5 * sc, 0.4, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-1 * sc, 5 * sc, 2.4 * sc, 1.5 * sc, -0.4, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = '#f2d35c';
+    ctx.beginPath(); ctx.arc(0, 0, 6 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(6 * sc, -1 * sc, 3.6 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f7e08a'; // fluffy light belly: clearly a baby
+    ctx.beginPath(); ctx.ellipse(1 * sc, 1.5 * sc, 3.2 * sc, 2.2 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f0a22e';
+    ctx.beginPath();
+    ctx.moveTo(8.5 * sc, -2 * sc); ctx.lineTo(10.5 * sc, -1 * sc); ctx.lineTo(8.5 * sc, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#141414';
+    ctx.beginPath(); ctx.arc(6.5 * sc, -2.5 * sc, 0.8 * sc, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(6.5 * sc, 0.5 * sc, 0.8 * sc, 0, 7); ctx.fill();
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = dk.state === 'swim' ? 'rgba(10,40,80,0.25)' : 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(-1 * sc, 1 * sc, 9 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+  if (dk.state !== 'swim') {
+    ctx.fillStyle = '#e8912d';
+    ctx.beginPath(); ctx.ellipse(-1 * sc, -6 * sc, 3 * sc, 1.8 * sc, 0.4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-1 * sc, 6 * sc, 3 * sc, 1.8 * sc, -0.4, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = dk.body;
+  ctx.beginPath();
+  ctx.moveTo(-6 * sc, 0); ctx.lineTo(-12 * sc, -3.5 * sc); ctx.lineTo(-12 * sc, 3.5 * sc);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 0, 8 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(0, 0, 5 * sc, 3.2 * sc, 0, 0, 7); ctx.fill();
+  if (dk.drake) {
+    ctx.fillStyle = '#f2f2ee';
+    ctx.beginPath(); ctx.ellipse(5 * sc, 0, 1.8 * sc, 3.8 * sc, 0, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = dk.head;
+  ctx.beginPath(); ctx.arc(8.5 * sc, 0, 3.8 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f0a22e';
+  ctx.beginPath();
+  ctx.moveTo(11.5 * sc, -1.8 * sc); ctx.lineTo(14.5 * sc, 0); ctx.lineTo(11.5 * sc, 1.8 * sc);
+  ctx.closePath(); ctx.fill();
+  if (dk.state === 'gather' && dk.phase === 'return') { // carrying nest material home
+    ctx.strokeStyle = dk.carry || '#7a5230';
+    ctx.lineWidth = 2.5 * sc;
+    ctx.beginPath();
+    ctx.moveTo(14 * sc, 0); ctx.lineTo(19 * sc, -3 * sc);
+    ctx.moveTo(14 * sc, 0); ctx.lineTo(19 * sc, 3 * sc);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#141414';
+  ctx.beginPath(); ctx.arc(9.5 * sc, -2 * sc, 0.9 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(9.5 * sc, 2 * sc, 0.9 * sc, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function drawBunny(bn, t) {
+  // Top-down bunny: long ears (they wiggle), round body, tail puff, feet
+  // out mid-hop. Babies are the same drawing, just small.
+  var sc = bn.sc;
+  ctx.save();
+  ctx.translate(bn.x, bn.y);
+  ctx.rotate(bn.heading);
+  ctx.globalAlpha = bn.fade; // old bunnies fade away
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(0, 1 * sc, 8 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f4f4f0';
+  ctx.beginPath(); ctx.arc(-7.5 * sc, 0, 2.6 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = bn.tone;
+  ctx.beginPath(); ctx.ellipse(0, 0, 7.5 * sc, 5.2 * sc, 0, 0, 7); ctx.fill();
+  var wig = Math.sin(t / 240 + bn.x * 0.1 + bn.y * 0.1) * 0.08;
+  for (var e = -1; e <= 1; e += 2) {
+    ctx.save();
+    ctx.translate(6 * sc, e * 2.5 * sc);
+    ctx.rotate(-e * (0.3 + wig)); // ears sweep backwards, away from the nose
+    ctx.fillStyle = bn.tone;
+    ctx.beginPath(); ctx.ellipse(-4 * sc, 0, 5 * sc, 2 * sc, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#e8a0b0';
+    ctx.beginPath(); ctx.ellipse(-4 * sc, 0, 3 * sc, 1.1 * sc, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = bn.tone;
+  ctx.beginPath(); ctx.arc(6.5 * sc, 0, 4.2 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#141414';
+  ctx.beginPath(); ctx.arc(8 * sc, -2.2 * sc, 1 * sc, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(8 * sc, 2.2 * sc, 1 * sc, 0, 7); ctx.fill();
+  ctx.fillStyle = '#e0879a';
+  ctx.beginPath(); ctx.arc(10.2 * sc, 0, 1.1 * sc, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function drawPlayer(sx, sy, t) {
+  // Small round explorer (smaller than a tree); fades when hiding
+  ctx.globalAlpha = playerA;
+  var bob = Math.sin(t / 130) * 1.2;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 9, 8, 3.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#2196f3';
+  ctx.strokeStyle = '#0d47a1';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 9, 0, 7); ctx.fill(); ctx.stroke();
+  // eyes look toward movement
+  var ex = -player.fy, ey = player.fx;
+  var cx = sx + player.fx * 3.5, cy = sy + bob * 0.4 + player.fy * 3.5;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(cx + ex * 3.6, cy + ey * 3.6, 2.6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx - ex * 3.6, cy - ey * 3.6, 2.6, 0, 7); ctx.fill();
+  ctx.fillStyle = '#10233f';
+  ctx.beginPath(); ctx.arc(cx + ex * 3.6 + player.fx, cy + ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx - ex * 3.6 + player.fx, cy - ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function render(t, rdt) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0b1020';
+  ctx.fillRect(0, 0, vw, vh);
+  var viewW = vw / ZOOM, viewH = vh / ZOOM;
+  var x0 = Math.max(0, Math.floor(cam.x / TILE));
+  var y0 = Math.max(0, Math.floor(cam.y / TILE));
+  var x1 = Math.min(W - 1, Math.ceil((cam.x + viewW) / TILE));
+  var y1 = Math.min(H - 1, Math.ceil((cam.y + viewH) / TILE));
+  // Objects need a wider cull range than ground: tree canopies spill ~2
+  // tiles past their trunk tile, so without a margin they pop in at the
+  // screen edge instead of already being there.
+  var M = 3;
+  var ox0 = Math.max(0, x0 - M), oy0 = Math.max(0, y0 - M);
+  var ox1 = Math.min(W - 1, x1 + M), oy1 = Math.min(H - 1, y1 + M);
+  var x, y;
+  ctx.setTransform(dpr * ZOOM, 0, 0, dpr * ZOOM, -cam.x * dpr * ZOOM, -cam.y * dpr * ZOOM);
+
+  // Ground uses the widened range too so tall details (cattails) spilling
+  // past their tile are already drawn before scrolling into view.
+  for (y = oy0; y <= oy1; y++) {
+    for (x = ox0; x <= ox1; x++) {
+      var i = idx(x, y);
+      var b = biome[i];
+      var sx = x * TILE, sy = y * TILE;
+      var v = hash2(x, y, 21) - 0.5;
+      if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
+      else if (b === WATER) ctx.fillStyle = shade(bigLake[i] ? C_LAKE : C_WATER, v * 12);
+      else if (b === SAND) ctx.fillStyle = shade(C_SAND, v * 14);
+      else {
+        // grass hugging a pond or lake reads a little darker (2-tile ring)
+        var dg = false;
+        for (var dgy = -2; dgy <= 2 && !dg; dgy++) {
+          for (var dgx = -2; dgx <= 2; dgx++) {
+            if (!dgx && !dgy) continue;
+            var dxx = x + dgx, dyy = y + dgy;
+            if (dxx < 0 || dyy < 0 || dxx >= W || dyy >= H) continue;
+            if (biome[idx(dxx, dyy)] === WATER) { dg = true; break; }
+          }
+        }
+        ctx.fillStyle = snow[i] ? shade(C_SNOW, v * 10) : shade(dg ? C_GRASS_DARK : C_GRASS, v * 16);
+      }
+      ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+
+      if (b === WATER || b === OCEAN) {
+        // gentle shimmer
+        if (hash2(x, y, 22) < 0.18) {
+          var ph = Math.sin(t / 700 + x * 1.3 + y * 0.7);
+          ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 + 0.08 * ph).toFixed(3) + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          var wy = sy + 8 + hash2(x, y, 23) * 16;
+          ctx.moveTo(sx + 5, wy);
+          ctx.quadraticCurveTo(sx + 12, wy - 3 + ph * 2, sx + 19, wy);
+          ctx.quadraticCurveTo(sx + 24, wy + 3 - ph * 2, sx + 28, wy);
+          ctx.stroke();
+        }
+        if (b === WATER && !ice[i] && hash2(x, y, 221) < 0.06) {
+          // lily pad with a notch, rarely flowering (never on ice)
+          // lily pad with a notch, rarely flowering
+          var lpx = sx + 9 + hash2(x, y, 222) * 14, lpy = sy + 9 + hash2(x, y, 223) * 14;
+          var lpr = 5 + hash2(x, y, 224) * 3;
+          var lpa0 = hash2(x, y, 225) * Math.PI * 2;
+          ctx.fillStyle = hash2(x, y, 226) < 0.5 ? '#2f8f4f' : '#3aa655';
+          ctx.beginPath();
+          ctx.moveTo(lpx, lpy);
+          ctx.arc(lpx, lpy, lpr, lpa0, lpa0 + Math.PI * 1.7);
+          ctx.closePath();
+          ctx.fill();
+          if (hash2(x, y, 227) < 0.2) {
+            ctx.fillStyle = '#ffb7d5';
+            ctx.beginPath(); ctx.arc(lpx + 1, lpy - 1, 1.8, 0, 7); ctx.fill();
+            ctx.fillStyle = '#ff9d00';
+            ctx.beginPath(); ctx.arc(lpx + 1, lpy - 1, 0.9, 0, 7); ctx.fill();
+          }
+        }
+        if (b === WATER && ice[i]) {
+          // frozen over: the regular pond look, just whiter, plus faint cracks
+          ctx.fillStyle = 'rgba(232,240,248,0.5)';
+          ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+          if (hash2(x, y, 651) < 0.6) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            var icx1 = sx + 4 + hash2(x, y, 652) * 24, icy1 = sy + 4 + hash2(x, y, 653) * 24;
+            ctx.moveTo(icx1, icy1);
+            ctx.lineTo(icx1 + (hash2(x, y, 654) - 0.5) * 20, icy1 + (hash2(x, y, 655) - 0.5) * 20);
+            ctx.stroke();
+          }
+        }
+      } else if (b === GRASS) {
+        if (snow[i]) {
+          // snowfield sparkle — no summer plants up here
+          if (hash2(x, y, 631) < 0.3) {
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillRect(sx + hash2(x, y, 632) * 26 + 2, sy + hash2(x, y, 633) * 26 + 2, 2.5, 2.5);
+          }
+          if (hash2(x, y, 634) < 0.12) {
+            ctx.fillStyle = 'rgba(190,210,235,0.5)';
+            ctx.fillRect(sx + hash2(x, y, 635) * 26 + 2, sy + hash2(x, y, 636) * 26 + 2, 3, 3);
+          }
+        } else {
+        if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i]) {
+          ctx.strokeStyle = 'rgba(20,90,40,0.7)';
+          ctx.lineWidth = 2;
+          var gx = sx + 6 + hash2(x, y, 25) * 20;
+          var gy = sy + 6 + hash2(x, y, 26) * 20;
+          ctx.beginPath();
+          ctx.moveTo(gx, gy); ctx.lineTo(gx - 2, gy - 6);
+          ctx.moveTo(gx + 5, gy + 1); ctx.lineTo(gx + 7, gy - 5);
+          ctx.stroke();
+        }
+        if (litter[i] === 3) {
+          // fallen stick with a tiny twig
+          var sa = hash2(x, y, 105) * Math.PI;
+          var lxs = sx + 7 + hash2(x, y, 103) * 18, lys = sy + 7 + hash2(x, y, 104) * 18;
+          ctx.strokeStyle = '#7a5230';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(lxs - Math.cos(sa) * 6, lys - Math.sin(sa) * 6);
+          ctx.lineTo(lxs + Math.cos(sa) * 6, lys + Math.sin(sa) * 6);
+          ctx.stroke();
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(lxs + 1, lys - 1);
+          ctx.lineTo(lxs + 5, lys - 5);
+          ctx.stroke();
+        } else if (litter[i]) {
+          // fallen leaf
+          var la = hash2(x, y, 106) * Math.PI;
+          ctx.fillStyle = litter[i] === 1 ? '#6fae3f' : '#3c8c3f';
+          ctx.beginPath();
+          ctx.ellipse(sx + 7 + hash2(x, y, 103) * 18, sy + 7 + hash2(x, y, 104) * 18, 4.5, 2.8, la, 0, 7);
+          ctx.fill();
+        }
+        if (open[i] && !dg && !bushes[i] && hash2(x, y, 161) < 0.09) {
+          // tiny wildflowers (fields only)
+          var fx = sx + 5 + hash2(x, y, 162) * 22, fy = sy + 5 + hash2(x, y, 163) * 22;
+          var fc = hash2(x, y, 164);
+          var petal = fc < 0.4 ? '#ffffff' : (fc < 0.7 ? '#ffd94d' : '#ff9ecf');
+          ctx.strokeStyle = '#2c7a3f';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(fx, fy + 4); ctx.lineTo(fx, fy); ctx.stroke();
+          ctx.fillStyle = petal;
+          ctx.beginPath(); ctx.arc(fx - 2, fy - 1, 1.8, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(fx + 2, fy - 1, 1.8, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(fx, fy - 3.5, 1.8, 0, 7); ctx.fill();
+          ctx.fillStyle = '#ff9d00';
+          ctx.beginPath(); ctx.arc(fx, fy - 1.2, 1.3, 0, 7); ctx.fill();
+        }
+        if (open[i] && !bushes[i] && hash2(x, y, 171) < 0.07) {
+          // feathery ferns (fields only)
+          var qx = sx + 6 + hash2(x, y, 172) * 20, qy = sy + 10 + hash2(x, y, 173) * 16;
+          var qs = 0.8 + hash2(x, y, 174) * 0.5;
+          for (var qd = 0; qd < 6; qd++) {
+            var qa = -Math.PI * 0.75 + qd * (Math.PI * 0.1) + (hash2(x, y, 175 + qd) - 0.5) * 0.3;
+            var ql = (12 + hash2(x, y, 181 + qd) * 6) * qs;
+            ctx.strokeStyle = qd % 2 ? '#2f8f4f' : '#3aa655';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(qx, qy);
+            ctx.quadraticCurveTo(qx + Math.cos(qa) * ql * 0.5, qy + Math.sin(qa) * ql * 0.5 - 3, qx + Math.cos(qa) * ql, qy + Math.sin(qa) * ql - 5);
+            ctx.stroke();
+          }
+        }
+        if (dg && !bushes[i] && !trees[i] && hash2(x, y, 241) < 0.35) {
+          // bank ferns: lots of them, varied sizes and two shapes
+          var nx = sx + 6 + hash2(x, y, 242) * 20, ny = sy + 12 + hash2(x, y, 243) * 14;
+          var ns = 0.7 + hash2(x, y, 244) * 0.9; // 0.7x - 1.6x size
+          var broad = hash2(x, y, 245) < 0.35; // broad few-frond type vs feathery type
+          var nn = broad ? 4 + ((hash2(x, y, 246) * 2) | 0) : 6 + ((hash2(x, y, 246) * 3) | 0);
+          var na0 = -Math.PI / 2 - (nn - 1) * 0.16;
+          for (var nq = 0; nq < nn; nq++) {
+            var na = na0 + nq * 0.32 + (hash2(x, y, 247 + nq) - 0.5) * 0.35;
+            var nl = (broad ? 10 + hash2(x, y, 251 + nq) * 8 : 12 + hash2(x, y, 251 + nq) * 8) * ns;
+            ctx.strokeStyle = (nq % 2 ? (broad ? '#2c7a3f' : '#2f8f4f') : (broad ? '#3fa655' : '#3aa655'));
+            ctx.lineWidth = broad ? 3 : 2;
+            ctx.beginPath();
+            ctx.moveTo(nx, ny);
+            ctx.quadraticCurveTo(nx + Math.cos(na) * nl * 0.5, ny + Math.sin(na) * nl * 0.5 - 3 * ns, nx + Math.cos(na) * nl, ny + Math.sin(na) * nl - 5 * ns);
+            ctx.stroke();
+          }
+        }
+        if (dg && !bushes[i] && !trees[i] && hash2(x, y, 211) < 0.08) {
+          // tall cattail clump: every stalk rises from one base point
+          var kx = sx + 10 + hash2(x, y, 212) * 12, ky = sy + 25 + hash2(x, y, 213) * 5;
+          // a couple of blades fanning out at the base
+          for (var kkb = 0; kkb < 2; kkb++) {
+            var kbd = kkb === 0 ? -1 : 1;
+            var kbh = 10 + hash2(x + kkb * 3, y + kkb * 7, 218) * 5;
+            ctx.strokeStyle = '#35924a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(kx, ky);
+            ctx.quadraticCurveTo(kx + kbd * 6, ky - kbh * 0.6, kx + kbd * 10, ky - kbh);
+            ctx.stroke();
+          }
+          var kns = 3 + ((hash2(x, y, 214) * 2) | 0); // 3-4 stalks
+          for (var kks = 0; kks < kns; kks++) {
+            var kh = 26 + hash2(x + kks * 7, y + kks * 11, 216) * 18;
+            var kln = (hash2(x + kks * 13, y + kks * 17, 217) - 0.5) * 24;
+            var khl = 8 + hash2(x + kks * 19, y + kks * 23, 219) * 3;
+            var ktx = kx + kln, kty = ky - kh;
+            ctx.strokeStyle = kks % 2 ? '#2f7a3d' : '#35924a';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(kx, ky);
+            ctx.quadraticCurveTo(kx + kln * 0.5, ky - kh * 0.5, ktx, kty);
+            ctx.stroke();
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#6b4a2b';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(ktx, kty);
+            ctx.lineTo(ktx, kty + khl);
+            ctx.stroke();
+            ctx.lineCap = 'butt';
+            ctx.strokeStyle = '#d9c27a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(ktx, kty);
+            ctx.lineTo(ktx, kty - 5);
+            ctx.stroke();
+          }
+        }
+        }
+      } else if (b === SAND) {
+        if (shells[i]) {
+          // little scallop shell
+          var shx = sx + 7 + hash2(x, y, 203) * 18, shy = sy + 9 + hash2(x, y, 204) * 14;
+          var shr = hash2(x, y, 205) * Math.PI * 2;
+          var shc = shells[i] === 1 ? '#f7c8d8' : (shells[i] === 2 ? '#f5f0e6' : '#d8b8e8');
+          ctx.save();
+          ctx.translate(shx, shy);
+          ctx.rotate(shr);
+          ctx.fillStyle = shc;
+          ctx.strokeStyle = 'rgba(120,90,110,0.8)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.strokeStyle = 'rgba(120,90,110,0.5)';
+          ctx.lineWidth = 1;
+          for (var sl = -1; sl <= 1; sl++) {
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(sl * 3.5, -4.5); ctx.stroke();
+          }
+          ctx.fillStyle = '#8a6a7a';
+          ctx.beginPath(); ctx.arc(0, 1.5, 1.5, 0, 7); ctx.fill();
+          ctx.restore();
+        }
+        if (hash2(x, y, 27) < 0.4) {
+          ctx.fillStyle = 'rgba(190,170,100,0.6)';
+          ctx.fillRect(sx + hash2(x, y, 28) * 26 + 2, sy + hash2(x, y, 29) * 26 + 2, 3, 3);
+        }
+      }
+    }
+  }
+
+  // Fish gliding through the water (still body, motion does the work)
+  for (var dfi = 0; dfi < fishes.length; dfi++) {
+    var df = fishes[dfi];
+    if (df.x < cam.x - 30 || df.x > cam.x + viewW + 30 || df.y < cam.y - 30 || df.y > cam.y + viewH + 30) continue;
+    ctx.save();
+    ctx.translate(df.x, df.y);
+    ctx.rotate(df.heading);
+    ctx.fillStyle = 'rgba(10, 40, 80, 0.35)';
+    ctx.beginPath(); ctx.ellipse(0, 0, 6, 2.4, 0, 0, 7); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-5, 0); ctx.lineTo(-9, -3); ctx.lineTo(-9, 3);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // Duck nests with eggs on the shores (twigs fill in as one is built)
+  for (var nti2 = 0; nti2 < nests.length; nti2++) {
+    var nt2 = nests[nti2];
+    if (nt2.x < cam.x - 40 || nt2.x > cam.x + viewW + 40 || nt2.y < cam.y - 40 || nt2.y > cam.y + viewH + 40) continue;
+    var np = nt2.built ? 1 : nt2.progress / nt2.need;
+    ctx.strokeStyle = 'rgba(122,82,48,0.45)'; // bare hollow, always there
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(nt2.x, nt2.y, 11, 8, 0.3, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 0.25 + 0.75 * np; // gathered twigs pile up trip by trip
+    ctx.strokeStyle = '#7a5230';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(nt2.x, nt2.y, 11, 8, 0.3, 0.3, Math.PI * 1.8); ctx.stroke();
+    ctx.strokeStyle = '#5d3f22';
+    ctx.beginPath(); ctx.ellipse(nt2.x, nt2.y, 8, 6, -0.2, Math.PI * 0.9, Math.PI * 2.6); ctx.stroke();
+    ctx.strokeStyle = '#8a6a3b';
+    ctx.beginPath(); ctx.ellipse(nt2.x, nt2.y, 9.5, 7, 1.2, Math.PI * 1.1, Math.PI * 2.2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    var negoff = hash2(nt2.x | 0, nt2.y | 0, 541) * Math.PI * 2;
+    for (var neg2 = 0; neg2 < nt2.eggs.length; neg2++) {
+      var ega = negoff + neg2 * (Math.PI * 2 / Math.max(1, nt2.clutch));
+      var egx = nt2.x + Math.cos(ega) * 4, egy = nt2.y + Math.sin(ega) * 3;
+      ctx.fillStyle = '#f5ead2';
+      ctx.beginPath(); ctx.ellipse(egx, egy, 3, 4, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#cbb98f';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(egx, egy, 3, 4, 0, 0, 7); ctx.stroke();
+    }
+  }
+
+  // Ducks paddling the ponds (and the odd one waddling ashore)
+  for (var dki2 = 0; dki2 < ducks.length; dki2++) {
+    var dk2 = ducks[dki2];
+    if (dk2.x < cam.x - 40 || dk2.x > cam.x + viewW + 40 || dk2.y < cam.y - 40 || dk2.y > cam.y + viewH + 40) continue;
+    drawDuck(dk2);
+  }
+
+  // Splash ripples where you wade (expanding rings + a foam dot)
+  for (var spi2 = 0; spi2 < splashes.length; spi2++) {
+    var sp2 = splashes[spi2];
+    if (sp2.x < cam.x - 30 || sp2.x > cam.x + viewW + 30 || sp2.y < cam.y - 30 || sp2.y > cam.y + viewH + 30) continue;
+    var st2 = sp2.age / sp2.life;
+    var sr = 3 + (sp2.maxR - 3) * st2;
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.55 * (1 - st2)).toFixed(3) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sp2.x, sp2.y, sr, 0, 7); ctx.stroke();
+    if (st2 < 0.4) {
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.5 * (1 - st2 / 0.4)).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(sp2.x, sp2.y, 2.5, 0, 7); ctx.fill();
+    }
+  }
+
+  // Y-sorted bushes + player (world coords; zoom transform is active)
+  var px = player.x, py = player.y;
+  var drewPlayer = false;
+  // crab holes on the sand (crabs themselves are y-sorted below)
+  for (var ho = 0; ho < crabHoles.length; ho++) {
+    var hole = crabHoles[ho];
+    ctx.fillStyle = 'rgba(170,140,90,0.9)';
+    ctx.beginPath(); ctx.ellipse(hole.x, hole.y, 6, 4.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#3a2c1c';
+    ctx.beginPath(); ctx.ellipse(hole.x, hole.y - 1, 3.5, 2.8, 0, 0, 7); ctx.fill();
+  }
+  // bunny burrows out in the fields: dirt mound with a dark hole
+  for (var bui = 0; bui < burrows.length; bui++) {
+    var bur2 = burrows[bui];
+    ctx.fillStyle = 'rgba(122,100,70,0.9)';
+    ctx.beginPath(); ctx.ellipse(bur2.x, bur2.y + 2, 11, 8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#2e2318';
+    ctx.beginPath(); ctx.ellipse(bur2.x, bur2.y, 6.5, 5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(bur2.x, bur2.y + 1.5, 3.5, 2.5, 0, 0, 7); ctx.fill();
+  }
+  var drawables = [];
+  for (y = oy0; y <= oy1; y++) {
+    for (x = ox0; x <= ox1; x++) {
+      var j = idx(x, y);
+      if (bushes[j] || stumps[j]) drawables.push([y * TILE + 12, x, y]);
+    }
+  }
+  for (var hi2 = 0; hi2 < crabHoles.length; hi2++) {
+    var hh = crabHoles[hi2];
+    if (hh.state === 'hidden') continue;
+    if (hh.cx < cam.x - 80 || hh.cx > cam.x + viewW + 80 || hh.cy < cam.y - 80 || hh.cy > cam.y + viewH + 80) continue;
+    drawables.push([hh.cy, 1000 + hi2, 0]);
+  }
+  for (var bki2 = 0; bki2 < bunnies.length; bki2++) {
+    var bn2 = bunnies[bki2];
+    if (bn2.state === 'inside') continue;
+    if (bn2.x < cam.x - 60 || bn2.x > cam.x + viewW + 60 || bn2.y < cam.y - 60 || bn2.y > cam.y + viewH + 60) continue;
+    drawables.push([bn2.y, 2000 + bki2, 0]);
+  }
+  drawables.sort(function (a, b2) { return a[0] - b2[0]; });
+  for (var d = 0; d < drawables.length; d++) {
+    var oy = drawables[d][0];
+    if (!drewPlayer && player.y < oy) { drawPlayer(px, py, t); drewPlayer = true; }
+    var ox = drawables[d][1] * TILE + TILE / 2;
+    var oyy = drawables[d][2] * TILE + TILE / 2;
+    var btx = drawables[d][1], bty = drawables[d][2];
+    var bti2 = idx(btx, bty);
+    if (btx >= 2000) drawBunny(bunnies[btx - 2000], t);
+    else if (btx >= 1000) drawCrab(crabHoles[btx - 1000], t);
+    else if (stumps[bti2]) drawStump(ox, oyy, btx, bty);
+    else {
+      var bsc = bushScale(btx, bty);
+      var bdx = player.x - ox, bdy = player.y - oyy;
+      var bUnder = (bdx * bdx + bdy * bdy) < (16 * bsc + 6) * (16 * bsc + 6);
+      var bTarget = bUnder ? 0.5 : 1;
+      bushA[bti2] += (bTarget - bushA[bti2]) * Math.min(1, rdt * 10);
+      drawBush(ox, oyy, btx, bty, berryN[bti2], bushA[bti2]);
+    }
+  }
+  if (!drewPlayer) drawPlayer(px, py, t);
+
+  // Tree canopies seen straight from above, always drawn above the player.
+  // They fade when you slip underneath so you can still see yourself.
+  // Uses the widened range so canopies hanging in from off-screen tiles
+  // are already drawn before their trunk tile scrolls into view.
+  for (var ty2 = oy0; ty2 <= oy1; ty2++) {
+    for (var tx2 = ox0; tx2 <= ox1; tx2++) {
+      var k = idx(tx2, ty2);
+      if (!trees[k]) continue;
+      var tsc = treeScale(tx2, ty2);
+      var ccx = tx2 * TILE + TILE / 2, ccy = ty2 * TILE + TILE / 2;
+      var pdx = player.x - ccx, pdy = player.y - ccy;
+      var under = (pdx * pdx + pdy * pdy) < (24 * tsc + 6) * (24 * tsc + 6);
+      var target = under ? 0.45 : 1;
+      treeA[k] += (target - treeA[k]) * Math.min(1, rdt * 10);
+      var trunkTarget = under ? 1 : 0;
+      trunkA[k] += (trunkTarget - trunkA[k]) * Math.min(1, rdt * 10);
+      drawTree(ccx, ccy, tx2, ty2, treeA[k], trunkA[k]);
+    }
+  }
+
+  // Pine canopies the same way: above the player, fading when underneath.
+  for (var ny2 = oy0; ny2 <= oy1; ny2++) {
+    for (var nx2 = ox0; nx2 <= ox1; nx2++) {
+      var nk = idx(nx2, ny2);
+      if (!pines[nk]) continue;
+      var nsc = pineScale(nx2, ny2);
+      var nccx = nx2 * TILE + TILE / 2, nccy = ny2 * TILE + TILE / 2;
+      var npdx = player.x - nccx, npdy = player.y - nccy;
+      var nunder = (npdx * npdx + npdy * npdy) < (24 * nsc + 6) * (24 * nsc + 6);
+      var ntarget = nunder ? 0.45 : 1;
+      pineA[nk] += (ntarget - pineA[nk]) * Math.min(1, rdt * 10);
+      var pineTrunkTarget = nunder ? 1 : 0;
+      pineTrunkA[nk] += (pineTrunkTarget - pineTrunkA[nk]) * Math.min(1, rdt * 10);
+      drawPine(nccx, nccy, nx2, ny2, pineA[nk], pineTrunkA[nk]);
+    }
+  }
+
+  // Palms above the player too; fronds fade and the trunk ring shows
+  // when you slip underneath, just like regular trees.
+  for (var py2 = oy0; py2 <= oy1; py2++) {
+    for (var px2 = ox0; px2 <= ox1; px2++) {
+      var pk = idx(px2, py2);
+      if (!palms[pk]) continue;
+      var psc = palmScale(px2, py2);
+      var pccx = px2 * TILE + TILE / 2, pccy = py2 * TILE + TILE / 2;
+      var ppdx = player.x - pccx, ppdy = player.y - pccy;
+      var punder = (ppdx * ppdx + ppdy * ppdy) < (24 * psc + 6) * (24 * psc + 6);
+      var ptarget = punder ? 0.45 : 1;
+      palmA[pk] += (ptarget - palmA[pk]) * Math.min(1, rdt * 10);
+      var ptrunkTarget = punder ? 1 : 0;
+      palmTrunkA[pk] += (ptrunkTarget - palmTrunkA[pk]) * Math.min(1, rdt * 10);
+      drawPalm(pccx, pccy, px2, py2, palmA[pk], palmTrunkA[pk]);
+    }
+  }
+
+  // Screen-space UI (joystick, minimap)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Touch joystick visual
+  if (joy.active) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(joy.bx, joy.by, 55, 0, 7); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath(); ctx.arc(joy.bx + joy.dx * 55, joy.by + joy.dy * 55, 22, 0, 7); ctx.fill();
+  }
+
+  // Minimap
+  var mm = 150, mx = vw - mm - 12, my = 12;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(mx - 5, my - 5, mm + 10, mm + 10);
+  ctx.drawImage(mapCanvas, mx, my, mm, mm);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(mx - 5, my - 5, mm + 10, mm + 10);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(mx + (player.x / WORLD_PX) * mm, my + (player.y / WORLD_PY) * mm, 3.5, 0, 7);
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// ---------- Main loop ----------
+var last = performance.now();
+function loop(now) {
+  var dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  render(now, dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

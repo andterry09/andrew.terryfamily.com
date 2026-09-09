@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Open World</title>
+<title>Mope Survival</title>
 <style>
   html, body {
     margin: 0;
@@ -68,7 +68,7 @@
 <body>
 <canvas id="game"></canvas>
 <div id="hud">
-  <div class="title">🌍 Open World</div>
+  <div class="title">🌍 Mope Survival</div>
   <div id="coords">x: 0, y: 0</div>
   <div id="berries">🫐 Berries: 0</div>
   <div id="shrooms">🍄 Mushrooms: 0</div>
@@ -8408,6 +8408,72 @@ function drawDuck(dk) {
     ctx.restore();
     return;
   }
+  // Picture ducks: duck-male.png for drakes, duck-female.png for hens.
+  // Chicks (above) always keep the canvas drawing. Falls back to the
+  // canvas duck until the pictures load.
+  var duckPic = null;
+  if (dk.drake) {
+    if (typeof duckMaleOk !== 'undefined' && duckMaleOk) duckPic = duckMaleImg;
+  } else {
+    if (typeof duckFemaleOk !== 'undefined' && duckFemaleOk) duckPic = duckFemaleImg;
+  }
+  if (duckPic) {
+    // NOTE: we are already inside the translated + rotated duck frame from
+    // the top of drawDuck (heading points along +x), so use local coords
+    // and only correct the picture's facing with a relative -90° turn.
+    var duckSwimming = (dk.state === 'swim' || dk.state === 'hunt' || dk.state === 'gulp');
+    ctx.fillStyle = duckSwimming ? 'rgba(10,40,80,0.25)' : 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(-1 * sc, 1 * sc, 9 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+    if (!duckSwimming) { // feet paddle out when ashore
+      ctx.fillStyle = '#e8912d';
+      ctx.beginPath(); ctx.ellipse(-1 * sc, -6 * sc, 3 * sc, 1.8 * sc, 0.4, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-1 * sc, 6 * sc, 3 * sc, 1.8 * sc, -0.4, 0, 7); ctx.fill();
+    }
+    ctx.save();
+    // your pictures face downward, the game faces +x here: correct by -90°
+    ctx.rotate(-Math.PI / 2);
+    var duckS = sc * 22;
+    var duckDw = duckS, duckDh = duckS * duckPic.height / duckPic.width;
+    ctx.drawImage(duckPic, -duckDw / 2, -duckDh / 2, duckDw, duckDh);
+    var beakY = duckDh * 0.47; // beak tip, ahead along the swim direction
+    if (dk.state === 'gather' && dk.phase === 'return') { // carrying nest material home
+      ctx.strokeStyle = dk.carry || '#7a5230';
+      ctx.lineWidth = 2.5 * sc;
+      ctx.beginPath();
+      ctx.moveTo(0, beakY); ctx.lineTo(3 * sc, beakY + 5 * sc);
+      ctx.moveTo(0, beakY); ctx.lineTo(-3 * sc, beakY + 5 * sc);
+      ctx.stroke();
+    }
+    if (dk.caught) { // fish held crosswise in the beak, out of the water and flopping
+      var dct = dk.caught.t, dcl = dk.caught.life;
+      var dprog = Math.min(1, dct / dcl);
+      var dflop = Math.sin(dct * 22) * (1 - dprog) * 0.55;
+      var dshrink = 1 - dprog * 0.3; // sinks into the beak as it gets swallowed
+      ctx.save();
+      ctx.translate(0, beakY);
+      ctx.rotate(dflop * 0.4);
+      ctx.scale(dshrink, dshrink);
+      var dfl = 10 * sc;
+      var dwag = Math.sin(dct * 26) * (1 - dprog) * 3 * sc; // thrashing tail
+      ctx.fillStyle = '#7a97a8'; // forked tail
+      ctx.beginPath();
+      ctx.moveTo(-dfl * 0.5, 0);
+      ctx.lineTo(-dfl * 0.85, -2.6 * sc + dwag);
+      ctx.lineTo(-dfl * 0.72, dwag * 0.5);
+      ctx.lineTo(-dfl * 0.85, 2.6 * sc + dwag);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#5b7d92'; // dark back
+      ctx.beginPath(); ctx.ellipse(0, -1 * sc, dfl * 0.5, 2.6 * sc, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#cfdde6'; // silver belly
+      ctx.beginPath(); ctx.ellipse(0, 0.8 * sc, dfl * 0.42, 1.9 * sc, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#10233f'; // eye
+      ctx.beginPath(); ctx.arc(3.4 * sc, -0.3 * sc, 0.9 * sc, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore(); // inner picture frame (translate/rotate)
+    ctx.restore(); // outer duck frame from the top of drawDuck (translate/rotate/fade)
+    return;
+  }
   ctx.fillStyle = (dk.state === 'swim' || dk.state === 'hunt' || dk.state === 'gulp') ? 'rgba(10,40,80,0.25)' : 'rgba(0,0,0,0.2)';
   ctx.beginPath(); ctx.ellipse(-1 * sc, 1 * sc, 9 * sc, 6 * sc, 0, 0, 7); ctx.fill();
   if (dk.state !== 'swim' && dk.state !== 'hunt' && dk.state !== 'gulp') {
@@ -9022,6 +9088,25 @@ function drawGator(ga, t) {
   var sc = ga.sc;
   var moving = (ga.state === 'cruise' && !ga.resting) || ga.state === 'hunt';
   var gulping = ga.state === 'gulp' ? Math.max(0, ga.gulpT / 2.0) : 0;
+  // Picture gator: uses gator.png if you put one next to
+  // mope-survival.html (transparent PNG facing downward works best),
+  // otherwise the built-in canvas drawing below.
+  if (typeof gatorImgOk !== 'undefined' && gatorImgOk) {
+    // picture gator, animated: gentle side-to-side sway while gliding plus
+    // a swell while gulping a duck down (shadow stays fitted right underneath)
+    ctx.save();
+    ctx.translate(ga.x, ga.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(-2 * sc, 2 * sc, 18 * sc, 7 * sc, 0, 0, 7); ctx.fill();
+    var gsway = moving ? Math.sin(ga.wig) * 0.06 : Math.sin(t / 600 + ga.x * 0.02) * 0.02;
+    // your picture faces downward, the game faces right: correct by -90°
+    ctx.rotate(ga.heading - Math.PI / 2 + gsway);
+    var gS = sc * 32 * (1 + gulping * 0.1);
+    var gDw = gS, gDh = gS * gatorImg.height / gatorImg.width;
+    ctx.drawImage(gatorImg, -gDw / 2, -gDh / 2, gDw, gDh);
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.translate(ga.x, ga.y);
   ctx.rotate(ga.heading);
@@ -9121,10 +9206,27 @@ function drawGator(ga, t) {
   ctx.restore();
 }
 function drawGrizzly(gz, t) {
-  // Big grizzly from above: humped brown bulk, dished face, small round
-  // ears, huge clawed paws. Gulping shows a bulge working down the belly.
+  // Big grizzly from above: uses bear.png if you put one next to
+  // mope-survival.html (transparent PNG facing downward works best),
+  // otherwise the built-in canvas drawing below.
   var sc = gz.sc;
   var gulping = gz.state === 'gulp' ? Math.max(0, gz.gulpT / 2.5) : 0;
+  if (typeof bearImgOk !== 'undefined' && bearImgOk) {
+    // picture bear, animated: soft waddle while walking/hunting plus a
+    // swell while gulping (shadow stays fitted right underneath)
+    ctx.save();
+    ctx.translate(gz.x, gz.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(0, 1.5 * sc, 12 * sc, 7.5 * sc, 0, 0, 7); ctx.fill();
+    var waddle = (!gz.resting && (gz.state === 'walk' || gz.state === 'hunt')) ? Math.sin(gz.step) * 0.08 : 0;
+    // your picture faces downward, the game faces right: correct by -90°
+    ctx.rotate(gz.heading - Math.PI / 2 + waddle);
+    var S = sc * 30 * (1 + gulping * 0.12);
+    var dw = S, dh = S * bearImg.height / bearImg.width;
+    ctx.drawImage(bearImg, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.translate(gz.x, gz.y);
   ctx.rotate(gz.heading);
@@ -9904,6 +10006,61 @@ function drawEagle(eg) {
   // treetop. Carried fish draw crosswise in the beak.
   var sc = eg.sc;
   var wing = Math.sin(eg.flap); // -1 tucked .. +1 raised
+  // Picture eagles: eagle-sit.png while eating on the treetop,
+  // eagle-fly.png everywhere else. Falls back to the canvas eagle until
+  // the pictures load.
+  var eaglePic = null;
+  if (eg.state === 'eat') {
+    if (typeof eagleSitOk !== 'undefined' && eagleSitOk) eaglePic = { img: eagleSitImg, S: sc * 30 };
+  } else {
+    if (typeof eagleFlyOk !== 'undefined' && eagleFlyOk) eaglePic = { img: eagleFlyImg, S: sc * 44 };
+  }
+  if (eaglePic) {
+    var eagleEating = eg.state === 'eat';
+    ctx.save();
+    ctx.translate(eg.x, eg.y);
+    if (eagleEating) {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath(); ctx.ellipse(0, 1 * sc, 8 * sc, 4 * sc, 0, 0, 7); ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.beginPath(); ctx.ellipse(-6 * sc, 4 * sc, 14 * sc, 6 * sc, 0, 0, 7); ctx.fill();
+    }
+    // your pictures face downward, the game faces right: correct by -90°
+    var eagleBank = eagleEating ? 0 : Math.sin(eg.flap * 0.35 + 1.3) * 0.05;
+    ctx.rotate(eg.heading - Math.PI / 2 + eagleBank);
+    var eagleSwell = eagleEating ? 1 : 1 + 0.03 * wing;
+    var eagleS = eaglePic.S * eagleSwell;
+    var eagleDw = eagleS, eagleDh = eagleS * eaglePic.img.height / eaglePic.img.width;
+    ctx.drawImage(eaglePic.img, -eagleDw / 2, -eagleDh / 2, eagleDw, eagleDh);
+    if (eg.preyKind === 'fish' && eg.prey && (eg.state === 'carry' || eg.state === 'eat')) {
+      // the catch held crosswise in the beak, at the beak tip
+      var efprog = eg.state === 'eat' ? Math.max(0, Math.min(1, 1 - eg.gulpT / 5)) : 0;
+      var eflop = Math.sin(eg.flap * 6) * (1 - efprog) * 0.5;
+      var efshrink = 1 - efprog * 0.6;
+      ctx.save();
+      ctx.translate(0, eagleDh * 0.43);
+      ctx.rotate(eflop * 0.4);
+      ctx.scale(efshrink, efshrink);
+      var efl = 10 * sc;
+      ctx.fillStyle = '#7a97a8';
+      ctx.beginPath();
+      ctx.moveTo(-efl * 0.5, 0);
+      ctx.lineTo(-efl * 0.85, -2.6 * sc);
+      ctx.lineTo(-efl * 0.72, 0);
+      ctx.lineTo(-efl * 0.85, 2.6 * sc);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#5b7d92';
+      ctx.beginPath(); ctx.ellipse(0, -1 * sc, efl * 0.5, 2.6 * sc, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#cfdde6';
+      ctx.beginPath(); ctx.ellipse(0, 0.8 * sc, efl * 0.42, 1.9 * sc, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#10233f';
+      ctx.beginPath(); ctx.arc(3.4 * sc, -0.3 * sc, 0.9 * sc, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.translate(eg.x, eg.y);
   if (eg.state === 'eat') {
@@ -10019,6 +10176,57 @@ function drawEagle(eg) {
     ctx.restore();
   }
   ctx.restore();
+}
+// Optional bear picture: drop a bear.png next to mope-survival.html and the
+// game uses it instead of the built-in drawing (transparent PNG facing
+// downward works best — the game rotates it to face the walk direction).
+// Until it loads, the canvas bear shows.
+var bearImg = null, bearImgOk = false;
+if (typeof Image !== 'undefined') {
+  bearImg = new Image();
+  bearImg.onload = function () { bearImgOk = true; };
+  bearImg.src = 'bear.png';
+}
+// Optional eagle pictures: drop eagle-fly.png (wings spread, flying) and
+// eagle-sit.png (wings folded, sitting) next to mope-survival.html and the
+// game uses them instead of the built-in drawing (transparent PNGs facing
+// downward work best — the game rotates them to face the flight direction).
+// Until they load, the canvas eagle shows.
+var eagleFlyImg = null, eagleFlyOk = false;
+var eagleSitImg = null, eagleSitOk = false;
+if (typeof Image !== 'undefined') {
+  eagleFlyImg = new Image();
+  eagleFlyImg.onload = function () { eagleFlyOk = true; };
+  eagleFlyImg.src = 'eagle-fly.png';
+  eagleSitImg = new Image();
+  eagleSitImg.onload = function () { eagleSitOk = true; };
+  eagleSitImg.src = 'eagle-sit.png';
+}
+// Optional duck pictures: drop duck-male.png (green-headed drake) and
+// duck-female.png (white hen) next to mope-survival.html and the game uses
+// them instead of the built-in drawing (transparent PNGs facing downward
+// work best — the game rotates them to face the swim direction). Chicks
+// always keep the canvas drawing. Until the pictures load, the canvas
+// duck shows.
+var duckMaleImg = null, duckMaleOk = false;
+var duckFemaleImg = null, duckFemaleOk = false;
+if (typeof Image !== 'undefined') {
+  duckMaleImg = new Image();
+  duckMaleImg.onload = function () { duckMaleOk = true; };
+  duckMaleImg.src = 'duck-male.png';
+  duckFemaleImg = new Image();
+  duckFemaleImg.onload = function () { duckFemaleOk = true; };
+  duckFemaleImg.src = 'duck-female.png';
+}
+// Optional gator picture: drop a gator.png next to mope-survival.html and
+// the game uses it instead of the built-in drawing (transparent PNG facing
+// downward works best — the game rotates it to face the glide direction).
+// Until it loads, the canvas gator shows.
+var gatorImg = null, gatorImgOk = false;
+if (typeof Image !== 'undefined') {
+  gatorImg = new Image();
+  gatorImg.onload = function () { gatorImgOk = true; };
+  gatorImg.src = 'gator.png';
 }
 // Optional dragon picture: drop a dragon.png next to world.html and the
 // game uses it instead of the built-in drawing (transparent PNG facing
