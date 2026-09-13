@@ -200,14 +200,16 @@
     }
     render();
 
-    statusEl.textContent = "Loading the AI…";
+    statusEl.textContent = "Loading the AI code…";
     goBtn.disabled = true;
     let removeBackground;
     try {
-      ({ removeBackground } = await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs"));
+      const aiPromise = import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs");
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("AI code download timed out after 60s")), 60000));
+      ({ removeBackground } = await Promise.race([aiPromise, timeout]));
     } catch (impErr) {
       console.error(impErr);
-      statusEl.textContent = "Could not load the AI. Check your internet, reload the page, or try Chrome.";
+      statusEl.textContent = "Could not load the AI (" + ((impErr && impErr.message) || impErr) + "). Check internet, reload, or try Chrome.";
       render();
       return;
     }
