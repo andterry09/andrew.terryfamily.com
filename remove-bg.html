@@ -142,15 +142,16 @@
   let fileBlob = null;
   let outFile = null;
   let beforeURL = "";
+  let noSubject = false;
 
   function render() {
     if (UNLIMITED_TEST) {
       creditsEl.textContent = "∞ Unlimited uses (test mode)";
-      goBtn.disabled = !fileBlob;
+      goBtn.disabled = !fileBlob || noSubject;
       return;
     }
     creditsEl.textContent = "Free left: " + freeLeft() + " | Paid left: " + paidLeft();
-    goBtn.disabled = !fileBlob || (freeLeft() + paidLeft() <= 0);
+    goBtn.disabled = !fileBlob || noSubject || (freeLeft() + paidLeft() <= 0);
     if (freeLeft() + paidLeft() <= 0) statusEl.textContent = "You are out. Get 50 or 150 below to keep going.";
   }
   render();
@@ -184,6 +185,7 @@
       fileNameEl.textContent = "Picked: " + (fileBlob.name || "pasted-image.png");
     }
     document.getElementById("cropcard").style.display = "none";
+    noSubject = false;
     statusEl.textContent = "";
     render();
   }
@@ -336,6 +338,7 @@
       }
       statusEl.textContent = "Checking the result…";
       const cleared = await fractionTransparent(outBlob);
+      noSubject = cleared < 0.05;
       if (cleared < 0.05) {
         statusEl.textContent = "Done, but no single subject was found so the whole photo was kept. Tap Pick just one part below and drag a box around the thing you want.";
       } else {
