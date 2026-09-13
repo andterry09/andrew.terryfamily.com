@@ -81,7 +81,7 @@
       <div class="grid">
         <div class="pane"><h3>Before</h3><img id="before" alt="Your photo will appear here"></div>
         <div class="pane after"><h3>After</h3><img id="after" alt="Result will appear here">
-          <div class="dlrow"><a id="dl" download="no-bg.png">⬇ Download result</a></div>
+          <div class="dlrow"><a id="dl" download="no-bg.png">⬇ Download result</a><br><button type="button" id="share" style="display:none;margin-top:10px;background:#1a2332;color:#fff;border:none;font-weight:700;padding:10px 22px;border-radius:10px;cursor:pointer;">Save to Photos (Recents)</button></div>
         </div>
       </div>
     </div>
@@ -127,6 +127,7 @@
   const fileNameEl = document.getElementById("filename");
   const goBtn = document.getElementById("go");
   let fileBlob = null;
+  let outFile = null;
 
   function render() {
     if (UNLIMITED_TEST) {
@@ -235,7 +236,7 @@
       statusEl.textContent = "Shrinking photo to speed things up…";
       const small = await shrink(fileBlob);
       const outBlob = await removeBackground(small, {
-        model: "isnet_quint8",
+        model: "isnet_fp16",
         progress: (key, current, total) => {
           lastProgress = Date.now();
           parts[key] = { current, total };
@@ -247,7 +248,18 @@
       document.getElementById("after").src = url;
       const dl = document.getElementById("dl");
       dl.href = url; dl.style.display = "inline-block";
-      statusEl.textContent = "Done! Download below.";
+      outFile = new File([outBlob], "no-bg.png", { type: "image/png" });
+      const shareBtn = document.getElementById("share");
+      if (navigator.canShare && navigator.canShare({ files: [outFile] })) {
+        shareBtn.style.display = "inline-block";
+        shareBtn.onclick = async () => {
+          try { await navigator.share({ files: [outFile], title: "No background photo" }); }
+          catch (e) { /* closed without saving */ }
+        };
+      } else {
+        shareBtn.style.display = "none";
+      }
+      statusEl.textContent = "Done! Download below, or Save to Photos.";
     } catch (err) {
       clearInterval(stallTimer);
       console.error(err);
