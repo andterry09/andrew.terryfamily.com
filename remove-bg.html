@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Background Remover - Gamli</title>
+  <title>Background Remover</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Remove photo background in 1 click. 4 free every month. Buy 50 for $5 or 150 for $9.">
-  <link rel="icon" href="logo.png" type="image/png">
   <style>
     body { background:#141c26; color:#fff; font-family:'Segoe UI',sans-serif; margin:0; padding-top:62px; text-align:center; }
     .topnav { position:fixed; top:0; left:0; right:0; z-index:100; display:flex; align-items:center; gap:12px; padding:10px 22px; background:rgba(20,28,38,.95); }
@@ -30,7 +29,8 @@
   </script>
 </head>
 <body>
-  <div class="topnav"><a href="index.html">Gamli</a><span>Background Remover</span></div>
+  <div class="topnav"><span style="color:#ffd700;font-weight:bold;font-size:1.3rem;letter-spacing:2px;">BG Remover</span></div>
+  <div id="testbanner" style="background:#ffd700;color:#222;padding:8px;text-align:center;font-weight:bold;">TEST MODE - free testing, no pay needed</div>
 
   <div class="box">
     <h1>Photo Background Remover</h1>
@@ -46,14 +46,14 @@
       <div class="col"><h3>After</h3><img id="after" alt=""><br><a id="dl" class="buy" style="display:none" download="no-bg.png">Download</a></div>
     </div>
 
-    <h2>Out of uses? Buy more:</h2>
+    <h2>Out of uses? Get more:</h2>
     <div class="packs">
-      <div class="pack"><b>50 uses - $5</b><p>for normal sellers</p><a class="buy" id="buy50" href="#">Buy 50</a></div>
-      <div class="pack"><b>150 uses - $9</b><p>best deal, for busy sellers</p><a class="buy" id="buy150" href="#">Buy 150</a></div>
+      <div class="pack"><b>50 uses - $5</b><p>for normal sellers</p><a class="buy" id="buy50" href="#">Test: Get 50 free</a></div>
+      <div class="pack"><b>150 uses - $9</b><p>best deal, for busy sellers</p><a class="buy" id="buy150" href="#">Test: Get 150 free</a></div>
     </div>
-    <p><small>Free 4 reset every month. Paid uses never expire.<br>
-    TODO: replace Buy buttons with your Stripe Payment Links that redirect back to <br>
-    remove-bg.html?bought=50 and remove-bg.html?bought=150</small></p>
+    <p><button id="reset" style="padding:8px 18px;font-size:.95rem;">Reset test uses</button></p>
+    <p><small>TEST MODE is ON so you pay nothing. Free 4 reset every month. Paid uses never expire.<br>
+    When ready for real money, I will switch on Stripe payments.</small></p>
   </div>
 
 <script type="module">
@@ -96,11 +96,12 @@
   }
   render();
 
-  // TODO: paste your Stripe Payment Links here
-  document.getElementById("buy50").href = "#";   // e.g. https://buy.stripe.com/xxx?client_reference_id=50
-  document.getElementById("buy150").href = "#";  // e.g. https://buy.stripe.com/yyy
-  document.getElementById("buy50").onclick = (e) => { if (e.target.href.endsWith("#")) { e.preventDefault(); alert("Step 1: make a $5 Stripe Payment Link, set it to go back to remove-bg.html?bought=50"); } };
-  document.getElementById("buy150").onclick = (e) => { if (e.target.href.endsWith("#")) { e.preventDefault(); alert("Step 1: make a $9 Stripe Payment Link, set it to go back to remove-bg.html?bought=150"); } };
+  // TEST MODE ON: no real payment, just add uses for testing.
+  // Later set TEST_MODE=false and paste Stripe Payment Links to take real money.
+  const TEST_MODE = true;
+  document.getElementById("buy50").onclick = (e) => { e.preventDefault(); localStorage.setItem("bg_paid", String(paidLeft() + 50)); render(); statusEl.textContent = "Test: added 50 uses. No charge."; };
+  document.getElementById("buy150").onclick = (e) => { e.preventDefault(); localStorage.setItem("bg_paid", String(paidLeft() + 150)); render(); statusEl.textContent = "Test: added 150 uses. No charge."; };
+  document.getElementById("reset").onclick = () => { localStorage.setItem("bg_free_used", "0"); localStorage.setItem("bg_paid", "0"); render(); statusEl.textContent = "Test reset. You have 4 free again."; };
 
   fileEl.onchange = () => {
     fileBlob = fileEl.files[0] || null;
