@@ -6,57 +6,94 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Remove photo background in 1 click. 4 free every month. Buy 50 for $5 or 150 for $9.">
   <style>
-    body { background:#141c26; color:#fff; font-family:'Segoe UI',sans-serif; margin:0; padding-top:62px; text-align:center; }
-    .topnav { position:fixed; top:0; left:0; right:0; z-index:100; display:flex; align-items:center; gap:12px; padding:10px 22px; background:rgba(20,28,38,.95); }
-    .topnav a { color:#ffd700; font-weight:bold; text-decoration:none; font-size:1.3rem; letter-spacing:2px; }
-    .box { background:rgba(44,62,80,.92); border-radius:18px; max-width:640px; margin:30px auto; padding:28px 22px; box-shadow:0 4px 24px #0005; }
-    .credits { font-size:1.2rem; background:#0009; display:inline-block; padding:10px 20px; border-radius:10px; margin:10px 0; }
-    button, .buy { background:linear-gradient(90deg,#4caf50,#2196f3); color:#fff; border:none; border-radius:8px; padding:12px 26px; font-size:1.05rem; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; margin:8px; }
-    button:disabled { background:#555; cursor:not-allowed; }
-    button:hover:not(:disabled), .buy:hover { filter:brightness(1.15); }
-    input[type=file] { margin:15px 0; }
-    img { max-width:100%; max-height:300px; border-radius:12px; margin:10px; background:#fff; }
-    .row { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
-    .col { flex:1 1 250px; }
-    .packs { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:15px; }
-    .pack { background:#0007; border:1px solid #ffffff33; border-radius:12px; padding:16px; min-width:200px; }
-    .pack b { font-size:1.3rem; color:#ffd700; }
-    #status { min-height:24px; color:#b8eaff; margin:10px 0; }
-    small { color:#bbb; }
-    #drop { border:2px dashed #4caf50; border-radius:14px; padding:30px 15px; margin:15px 0; cursor:pointer; background:#0005; }
-    #drop:hover { background:#0008; border-color:#ffd700; }
-    #drop input { margin-top:12px; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(180deg,#f6f8fc,#e9eef6); color:#1a2332; min-height:100vh; }
+    .topbar { position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:rgba(255,255,255,.85); backdrop-filter:blur(10px); border-bottom:1px solid #e2e8f0; }
+    .brand { font-weight:800; font-size:1.2rem; letter-spacing:.3px; }
+    .brand span { background:linear-gradient(90deg,#6366f1,#22d3ee); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .pill { font-size:.75rem; font-weight:700; background:#fef3c7; color:#92400e; border:1px solid #fcd34d; padding:5px 12px; border-radius:999px; }
+    .wrap { max-width:920px; margin:0 auto; padding:24px 16px 60px; }
+    .hero { text-align:center; margin:18px 0 20px; }
+    .hero h1 { margin:0 0 8px; font-size:2rem; }
+    .hero p { margin:0; color:#5b6b82; }
+    .credits { display:inline-block; margin-top:12px; background:#1a2332; color:#fff; font-weight:700; padding:8px 18px; border-radius:999px; font-size:.9rem; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:22px; box-shadow:0 10px 30px rgba(30,41,59,.08); margin:16px 0; }
+    #drop { display:block; border:2px dashed #c7d2fe; border-radius:16px; padding:34px 18px; text-align:center; background:#f8faff; cursor:pointer; transition:.15s; }
+    #drop:hover, #drop.over { border-color:#6366f1; background:#eef2ff; }
+    #drop .big { font-size:1.05rem; font-weight:700; }
+    #drop .sub { color:#6b7a90; font-size:.9rem; margin:6px 0 14px; }
+    #pickbtn { display:inline-block; background:linear-gradient(90deg,#6366f1,#0ea5e9); color:#fff; font-weight:700; padding:12px 24px; border-radius:12px; }
+    #file { display:none; }
+    #filename { margin-top:10px; font-size:.85rem; color:#475569; }
+    #go { width:100%; margin-top:14px; border:none; border-radius:14px; padding:16px; font-size:1.05rem; font-weight:800; color:#fff; background:linear-gradient(90deg,#22c55e,#0ea5e9); cursor:pointer; }
+    #go:disabled { background:#cbd5e1; cursor:not-allowed; }
+    #status { text-align:center; min-height:24px; color:#475569; margin:4px 0 0; font-size:.95rem; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width:640px){ .grid{grid-template-columns:1fr;} .hero h1{font-size:1.5rem;} }
+    .pane { border:1px solid #e2e8f0; border-radius:14px; overflow:hidden; background:#f8fafc; }
+    .pane h3 { margin:0; padding:10px; font-size:.85rem; text-transform:uppercase; letter-spacing:1px; color:#64748b; border-bottom:1px solid #e2e8f0; }
+    .pane img { width:100%; height:280px; object-fit:contain; display:block; background:#fff; }
+    .pane.after img { background-image:linear-gradient(45deg,#e2e8f0 25%,transparent 25%),linear-gradient(-45deg,#e2e8f0 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e2e8f0 75%),linear-gradient(-45deg,transparent 75%,#e2e8f0 75%); background-size:20px 20px; background-position:0 0,0 10px,10px -10px,-10px 0; }
+    .dlrow { padding:12px; text-align:center; }
+    #dl { display:none; background:#1a2332; color:#fff; text-decoration:none; font-weight:700; padding:10px 22px; border-radius:10px; }
+    .packs { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width:640px){ .packs{grid-template-columns:1fr;} }
+    .pack { border:1px solid #e2e8f0; border-radius:16px; padding:18px; text-align:center; background:#f8faff; }
+    .pack.hot { border-color:#6366f1; background:#eef2ff; }
+    .pack b { font-size:1.25rem; }
+    .pack p { color:#64748b; margin:6px 0 12px; }
+    .pack a { display:inline-block; background:#fff; border:1px solid #cbd5e1; color:#1a2332; font-weight:700; padding:10px 20px; border-radius:10px; text-decoration:none; }
+    .pack.hot a { background:#1a2332; color:#fff; border-color:#1a2332; }
+    .fine { text-align:center; color:#8494ab; font-size:.85rem; }
+    #reset { background:none; border:1px solid #cbd5e1; border-radius:999px; padding:8px 18px; cursor:pointer; color:#475569; }
   </style>
   <script type="importmap">
     { "imports": { "@imgly/background-removal": "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs" } }
   </script>
 </head>
 <body>
-  <div class="topnav"><span style="color:#ffd700;font-weight:bold;font-size:1.3rem;letter-spacing:2px;">BG Remover</span></div>
-  <div id="testbanner" style="background:#ffd700;color:#222;padding:8px;text-align:center;font-weight:bold;">TEST MODE - free testing, no pay needed</div>
+  <div class="topbar">
+    <div class="brand">✂️ <span>BG Remover</span></div>
+    <div class="pill">TEST MODE · free testing</div>
+  </div>
 
-  <div class="box">
-    <h1>Photo Background Remover</h1>
-    <p>1 photo = 1 use.<br>4 free every month. Then buy more.</p>
-    <div class="credits" id="credits">...</div>
-    <div id="status"></div>
-
-    <label id="drop">Drop photo here or<br><span class="buy" id="pickbtn">Choose from Photo Library</span><br><input type="file" id="file" accept="image/*"></label><br>
-    <button id="go" disabled>Remove background (unlimited test)</button>
-
-    <div class="row">
-      <div class="col"><h3>Before</h3><img id="before" alt=""></div>
-      <div class="col"><h3>After</h3><img id="after" alt=""><br><a id="dl" class="buy" style="display:none" download="no-bg.png">Download</a></div>
+  <div class="wrap">
+    <div class="hero">
+      <h1>Remove any photo background</h1>
+      <p>Pick a photo → 1 click → download with no background.</p>
+      <div class="credits" id="credits">Loading…</div>
+      <div id="status"></div>
     </div>
 
-    <h2>Out of uses? Get more:</h2>
-    <div class="packs">
-      <div class="pack"><b>50 uses - $5</b><p>for normal sellers</p><a class="buy" id="buy50" href="#">Test: Get 50 free</a></div>
-      <div class="pack"><b>150 uses - $9</b><p>best deal, for busy sellers</p><a class="buy" id="buy150" href="#">Test: Get 150 free</a></div>
+    <div class="card">
+      <label id="drop">
+        <div class="big">Drag &amp; drop your photo here</div>
+        <div class="sub">or use the button below · JPG or PNG works best</div>
+        <span id="pickbtn">Choose from Photo Library</span>
+        <div id="filename"></div>
+        <input type="file" id="file" accept="image/*">
+      </label>
+      <button id="go" disabled>Remove background</button>
     </div>
-    <p><button id="reset" style="padding:8px 18px;font-size:.95rem;">Reset test uses</button></p>
-    <p><small>TEST MODE is ON so you pay nothing. Free 4 reset every month. Paid uses never expire.<br>
-    When ready for real money, I will switch on Stripe payments.</small></p>
+
+    <div class="card">
+      <div class="grid">
+        <div class="pane"><h3>Before</h3><img id="before" alt="Your photo will appear here"></div>
+        <div class="pane after"><h3>After</h3><img id="after" alt="Result will appear here">
+          <div class="dlrow"><a id="dl" download="no-bg.png">⬇ Download result</a></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 12px;text-align:center;">Need more uses?</h2>
+      <div class="packs">
+        <div class="pack"><b>50 uses · $5</b><p>for normal sellers</p><a id="buy50" href="#">Test: Get 50 free</a></div>
+        <div class="pack hot"><b>150 uses · $9</b><p>best deal · for busy sellers</p><a id="buy150" href="#">Test: Get 150 free</a></div>
+      </div>
+      <p style="text-align:center;"><button id="reset">Reset test uses</button></p>
+      <p class="fine">TEST MODE is ON so you pay nothing.<br>When ready for real money, I will switch on Stripe payments.</p>
+    </div>
   </div>
 
 <script type="module">
@@ -69,13 +106,11 @@
 
   function getNum(k, d=0){ return parseInt(localStorage.getItem(k) || d, 10) || 0; }
 
-  // reset free each month
   if (localStorage.getItem("bg_month") !== monthKey) {
     localStorage.setItem("bg_month", monthKey);
     localStorage.setItem("bg_free_used", "0");
   }
 
-  // handle return from Stripe: ?bought=50 or ?bought=150
   const params = new URLSearchParams(location.search);
   const bought = parseInt(params.get("bought") || "0", 10);
   if (bought === 50 || bought === 150) {
@@ -90,34 +125,34 @@
   const creditsEl = document.getElementById("credits");
   const statusEl = document.getElementById("status");
   const fileEl = document.getElementById("file");
+  const fileNameEl = document.getElementById("filename");
   const goBtn = document.getElementById("go");
   let fileBlob = null;
 
   function render() {
     if (UNLIMITED_TEST) {
-      creditsEl.textContent = "Unlimited uses (test mode)";
+      creditsEl.textContent = "∞ Unlimited uses (test mode)";
       goBtn.disabled = !fileBlob;
       return;
     }
     creditsEl.textContent = "Free left: " + freeLeft() + " | Paid left: " + paidLeft();
     goBtn.disabled = !fileBlob || (freeLeft() + paidLeft() <= 0);
-    if (freeLeft() + paidLeft() <= 0) statusEl.textContent = "You are out. Buy 50 or 150 below to keep going.";
+    if (freeLeft() + paidLeft() <= 0) statusEl.textContent = "You are out. Get 50 or 150 below to keep going.";
   }
   render();
 
-  // TEST MODE ON: no real payment, just add uses for testing.
-  // Later set TEST_MODE=false and paste Stripe Payment Links to take real money.
   const TEST_MODE = true;
   document.getElementById("buy50").onclick = (e) => { e.preventDefault(); localStorage.setItem("bg_paid", String(paidLeft() + 50)); render(); statusEl.textContent = "Test: added 50 uses. No charge."; };
   document.getElementById("buy150").onclick = (e) => { e.preventDefault(); localStorage.setItem("bg_paid", String(paidLeft() + 150)); render(); statusEl.textContent = "Test: added 150 uses. No charge."; };
   document.getElementById("reset").onclick = () => { localStorage.setItem("bg_free_used", "0"); localStorage.setItem("bg_paid", "0"); render(); statusEl.textContent = "Test reset. You have 4 free again."; };
 
-  // drag + drop onto the box
   const dropEl = document.getElementById("drop");
   document.getElementById("pickbtn").onclick = (e) => { e.preventDefault(); fileEl.click(); };
-  dropEl.addEventListener("dragover", (e) => { e.preventDefault(); });
+  dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("over"); });
+  dropEl.addEventListener("dragleave", () => dropEl.classList.remove("over"));
   dropEl.addEventListener("drop", (e) => {
     e.preventDefault();
+    dropEl.classList.remove("over");
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       fileEl.files = e.dataTransfer.files;
       fileEl.dispatchEvent(new Event("change"));
@@ -126,7 +161,10 @@
 
   fileEl.onchange = () => {
     fileBlob = fileEl.files[0] || null;
-    if (fileBlob) document.getElementById("before").src = URL.createObjectURL(fileBlob);
+    if (fileBlob) {
+      document.getElementById("before").src = URL.createObjectURL(fileBlob);
+      fileNameEl.textContent = "Picked: " + fileBlob.name;
+    }
     statusEl.textContent = "";
     render();
   };
@@ -140,7 +178,7 @@
     }
     render();
 
-    statusEl.textContent = "Working... first time downloads AI (~40MB), please wait.";
+    statusEl.textContent = "Working… first time loads the AI (about 40MB), please wait.";
     goBtn.disabled = true;
     try {
       const outBlob = await removeBackground(fileBlob);
@@ -148,17 +186,12 @@
       document.getElementById("after").src = url;
       const dl = document.getElementById("dl");
       dl.href = url; dl.style.display = "inline-block";
-      statusEl.textContent = "Done!";
+      statusEl.textContent = "Done! Download below.";
     } catch (err) {
       console.error(err);
       statusEl.textContent = "Error. Try a smaller JPG/PNG photo.";
-      // refund the use on error (only when counting uses)
       if (!UNLIMITED_TEST && freeLeft() < FREE_EACH_MONTH && paidLeft() >= 0) {
-        // put back: prefer refund paid if we used paid
-        // simple: if free was full use, we already know; just give back 1 to paid if free is 0
-        // easiest: give 1 back to paid if freeLeft()==0 else give back free
         if (getNum("bg_free_used") > 0 && freeLeft() < FREE_EACH_MONTH) {
-          // we may have used free; undo one free if paid was untouched - approximate refund to paid to be safe
           localStorage.setItem("bg_paid", String(paidLeft() + 1));
         }
       }
