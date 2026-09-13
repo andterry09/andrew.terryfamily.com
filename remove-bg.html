@@ -69,7 +69,7 @@
     <div class="card">
       <div id="drop">
         <div class="big">Pick a photo from your Photo Library</div>
-        <div class="sub">Tap the button · JPG or PNG works best</div>
+        <div class="sub">Tap the button · or drag a photo from the Photos app · JPG or PNG</div>
         <label id="pickbtn" for="file">Choose from Photo Library</label>
         <input type="file" id="file" accept="image/*">
         <div id="filename"></div>
@@ -149,6 +149,16 @@
   document.getElementById("reset").onclick = () => { localStorage.setItem("bg_free_used", "0"); localStorage.setItem("bg_paid", "0"); render(); statusEl.textContent = "Test reset. You have 4 free again."; };
 
   // Tapping the "Choose from Photo Library" label opens the picker natively (no JS click needed).
+  // Backup for Mac: drag a photo straight from the Photos app onto the box.
+  const dropEl = document.getElementById("drop");
+  dropEl.addEventListener("dragover", (e) => { e.preventDefault(); });
+  dropEl.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      fileEl.files = e.dataTransfer.files;
+      fileEl.dispatchEvent(new Event("change"));
+    }
+  });
 
   fileEl.onchange = () => {
     fileBlob = fileEl.files[0] || null;
