@@ -204,7 +204,7 @@
     goBtn.disabled = true;
     let removeBackground;
     try {
-      const aiPromise = import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs");
+      const aiPromise = import("https://esm.sh/@imgly/background-removal@1.7.0");
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("AI code download timed out after 60s")), 60000));
       ({ removeBackground } = await Promise.race([aiPromise, timeout]));
     } catch (impErr) {
@@ -213,19 +213,33 @@
       render();
       return;
     }
+    const t0 = Date.now();
     let lastProgress = Date.now();
+    const parts = {};
+    function etaText() {
+      let tot = 0, cur = 0;
+      for (const k in parts) { const p = parts[k]; if (p.total > 0) { tot += p.total; cur += Math.min(p.current, p.total); } }
+      const elapsed = Math.max(1, Math.round((Date.now() - t0) / 1000));
+      if (!tot) return "Loading… (" + elapsed + "s so far)";
+      const pct = Math.min(99, Math.round((cur / tot) * 100));
+      const rate = cur / elapsed;
+      const left = rate > 0 && tot > cur ? Math.max(1, Math.round((tot - cur) / rate)) : null;
+      return "Loading… " + pct + "%" + (left ? " — about " + left + "s left" : "") + " (" + elapsed + "s so far)";
+    }
     const stallTimer = setInterval(() => {
       const quiet = Math.round((Date.now() - lastProgress) / 1000);
-      if (quiet > 30) statusEl.textContent = "Still working… no movement for " + quiet + "s. Slow internet? Try a smaller photo or Chrome. Keep this tab open.";
-    }, 10000);
+      statusEl.textContent = etaText();
+      if (quiet > 30) statusEl.textContent += " No movement for " + quiet + "s — slow internet? Try Chrome. Keep this tab open.";
+    }, 1000);
     try {
       statusEl.textContent = "Shrinking photo to speed things up…";
       const small = await shrink(fileBlob);
       const outBlob = await removeBackground(small, {
+        model: "isnet_quint8",
         progress: (key, current, total) => {
           lastProgress = Date.now();
-          const pct = total ? Math.round((current / total) * 100) : current;
-          statusEl.textContent = "Loading AI " + pct + "% — first time only, keep this tab open.";
+          parts[key] = { current, total };
+          statusEl.textContent = etaText() + " — first load only.";
         }
       });
       clearInterval(stallTimer);
