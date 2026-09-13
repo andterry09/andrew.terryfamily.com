@@ -22,8 +22,8 @@
     #drop:hover, #drop.over { border-color:#6366f1; background:#eef2ff; }
     #drop .big { font-size:1.05rem; font-weight:700; }
     #drop .sub { color:#6b7a90; font-size:.9rem; margin:6px 0 14px; }
-    #pickbtn { display:inline-block; background:linear-gradient(90deg,#6366f1,#0ea5e9); color:#fff; font-weight:700; padding:12px 24px; border-radius:12px; }
-    #file { display:none; }
+    #pickbtn { display:inline-block; background:linear-gradient(90deg,#6366f1,#0ea5e9); color:#fff; font-weight:700; padding:12px 24px; border-radius:12px; border:none; cursor:pointer; font-size:1rem; }
+    #file { display:block; margin:12px auto 0; max-width:100%; }
     #filename { margin-top:10px; font-size:.85rem; color:#475569; }
     #go { width:100%; margin-top:14px; border:none; border-radius:14px; padding:16px; font-size:1.05rem; font-weight:800; color:#fff; background:linear-gradient(90deg,#22c55e,#0ea5e9); cursor:pointer; }
     #go:disabled { background:#cbd5e1; cursor:not-allowed; }
@@ -66,13 +66,13 @@
     </div>
 
     <div class="card">
-      <label id="drop">
+      <div id="drop">
         <div class="big">Drag &amp; drop your photo here</div>
         <div class="sub">or use the button below · JPG or PNG works best</div>
-        <span id="pickbtn">Choose from Photo Library</span>
+        <button type="button" id="pickbtn">Choose from Photo Library</button>
         <div id="filename"></div>
         <input type="file" id="file" accept="image/*">
-      </label>
+      </div>
       <button id="go" disabled>Remove background</button>
     </div>
 
@@ -147,7 +147,7 @@
   document.getElementById("reset").onclick = () => { localStorage.setItem("bg_free_used", "0"); localStorage.setItem("bg_paid", "0"); render(); statusEl.textContent = "Test reset. You have 4 free again."; };
 
   const dropEl = document.getElementById("drop");
-  document.getElementById("pickbtn").onclick = (e) => { e.preventDefault(); fileEl.click(); };
+  document.getElementById("pickbtn").onclick = () => { fileEl.click(); };
   dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("over"); });
   dropEl.addEventListener("dragleave", () => dropEl.classList.remove("over"));
   dropEl.addEventListener("drop", (e) => {
