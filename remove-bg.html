@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Background Remover - Gamli</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Remove photo background in 1 click. 4 free every month. Buy 50 for $5 or 150 for $9.">
+  <link rel="icon" href="logo.png" type="image/png">
+  <style>
+    body { background:#141c26; color:#fff; font-family:'Segoe UI',sans-serif; margin:0; padding-top:62px; text-align:center; }
+    .topnav { position:fixed; top:0; left:0; right:0; z-index:100; display:flex; align-items:center; gap:12px; padding:10px 22px; background:rgba(20,28,38,.95); }
+    .topnav a { color:#ffd700; font-weight:bold; text-decoration:none; font-size:1.3rem; letter-spacing:2px; }
+    .box { background:rgba(44,62,80,.92); border-radius:18px; max-width:640px; margin:30px auto; padding:28px 22px; box-shadow:0 4px 24px #0005; }
+    .credits { font-size:1.2rem; background:#0009; display:inline-block; padding:10px 20px; border-radius:10px; margin:10px 0; }
+    button, .buy { background:linear-gradient(90deg,#4caf50,#2196f3); color:#fff; border:none; border-radius:8px; padding:12px 26px; font-size:1.05rem; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; margin:8px; }
+    button:disabled { background:#555; cursor:not-allowed; }
+    button:hover:not(:disabled), .buy:hover { filter:brightness(1.15); }
+    input[type=file] { margin:15px 0; }
+    img { max-width:100%; max-height:300px; border-radius:12px; margin:10px; background:#fff; }
+    .row { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
+    .col { flex:1 1 250px; }
+    .packs { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:15px; }
+    .pack { background:#0007; border:1px solid #ffffff33; border-radius:12px; padding:16px; min-width:200px; }
+    .pack b { font-size:1.3rem; color:#ffd700; }
+    #status { min-height:24px; color:#b8eaff; margin:10px 0; }
+    small { color:#bbb; }
+  </style>
+  <script type="importmap">
+    { "imports": { "@imgly/background-removal": "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs" } }
+  </script>
+</head>
+<body>
+  <div class="topnav"><a href="index.html">Gamli</a><span>Background Remover</span></div>
+
+  <div class="box">
+    <h1>Photo Background Remover</h1>
+    <p>1 photo = 1 use.<br>4 free every month. Then buy more.</p>
+    <div class="credits" id="credits">...</div>
+    <div id="status"></div>
+
+    <input type="file" id="file" accept="image/*"><br>
+    <button id="go" disabled>Remove background (1 use)</button>
+
+    <div class="row">
+      <div class="col"><h3>Before</h3><img id="before" alt=""></div>
+      <div class="col"><h3>After</h3><img id="after" alt=""><br><a id="dl" class="buy" style="display:none" download="no-bg.png">Download</a></div>
+    </div>
+
+    <h2>Out of uses? Buy more:</h2>
+    <div class="packs">
+      <div class="pack"><b>50 uses - $5</b><p>for normal sellers</p><a class="buy" id="buy50" href="#">Buy 50</a></div>
+      <div class="pack"><b>150 uses - $9</b><p>best deal, for busy sellers</p><a class="buy" id="buy150" href="#">Buy 150</a></div>
+    </div>
+    <p><small>Free 4 reset every month. Paid uses never expire.<br>
+    TODO: replace Buy buttons with your Stripe Payment Links that redirect back to <br>
+    remove-bg.html?bought=50 and remove-bg.html?bought=150</small></p>
+  </div>
+
+<script type="module">
+  import { removeBackground } from "@imgly/background-removal";
+
+  const FREE_EACH_MONTH = 4;
+  const now = new Date();
+  const monthKey = now.getFullYear() + "-" + (now.getMonth()+1);
+
+  function getNum(k, d=0){ return parseInt(localStorage.getItem(k) || d, 10) || 0; }
+
+  // reset free each month
+  if (localStorage.getItem("bg_month") !== monthKey) {
+    localStorage.setItem("bg_month", monthKey);
+    localStorage.setItem("bg_free_used", "0");
+  }
+
+  // handle return from Stripe: ?bought=50 or ?bought=150
+  const params = new URLSearchParams(location.search);
+  const bought = parseInt(params.get("bought") || "0", 10);
+  if (bought === 50 || bought === 150) {
+    localStorage.setItem("bg_paid", String(getNum("bg_paid") + bought));
+    history.replaceState({}, "", location.pathname);
+    alert("Added " + bought + " uses. Thank you!");
+  }
+
+  function freeLeft() { return Math.max(0, FREE_EACH_MONTH - getNum("bg_free_used")); }
+  function paidLeft() { return getNum("bg_paid"); }
+
+  const creditsEl = document.getElementById("credits");
+  const statusEl = document.getElementById("status");
+  const fileEl = document.getElementById("file");
+  const goBtn = document.getElementById("go");
+  let fileBlob = null;
+
+  function render() {
+    creditsEl.textContent = "Free left: " + freeLeft() + " | Paid left: " + paidLeft();
+    goBtn.disabled = !fileBlob || (freeLeft() + paidLeft() <= 0);
+    if (freeLeft() + paidLeft() <= 0) statusEl.textContent = "You are out. Buy 50 or 150 below to keep going.";
+  }
+  render();
+
+  // TODO: paste your Stripe Payment Links here
+  document.getElementById("buy50").href = "#";   // e.g. https://buy.stripe.com/xxx?client_reference_id=50
+  document.getElementById("buy150").href = "#";  // e.g. https://buy.stripe.com/yyy
+  document.getElementById("buy50").onclick = (e) => { if (e.target.href.endsWith("#")) { e.preventDefault(); alert("Step 1: make a $5 Stripe Payment Link, set it to go back to remove-bg.html?bought=50"); } };
+  document.getElementById("buy150").onclick = (e) => { if (e.target.href.endsWith("#")) { e.preventDefault(); alert("Step 1: make a $9 Stripe Payment Link, set it to go back to remove-bg.html?bought=150"); } };
+
+  fileEl.onchange = () => {
+    fileBlob = fileEl.files[0] || null;
+    if (fileBlob) document.getElementById("before").src = URL.createObjectURL(fileBlob);
+    statusEl.textContent = "";
+    render();
+  };
+
+  goBtn.onclick = async () => {
+    if (!fileBlob) return;
+    if (freeLeft() > 0) localStorage.setItem("bg_free_used", String(getNum("bg_free_used") + 1));
+    else if (paidLeft() > 0) localStorage.setItem("bg_paid", String(paidLeft() - 1));
+    else { render(); return; }
+    render();
+
+    statusEl.textContent = "Working... first time downloads AI (~40MB), please wait.";
+    goBtn.disabled = true;
+    try {
+      const outBlob = await removeBackground(fileBlob);
+      const url = URL.createObjectURL(outBlob);
+      document.getElementById("after").src = url;
+      const dl = document.getElementById("dl");
+      dl.href = url; dl.style.display = "inline-block";
+      statusEl.textContent = "Done!";
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = "Error. Try a smaller JPG/PNG photo.";
+      // refund the use on error
+      if (freeLeft() < FREE_EACH_MONTH && paidLeft() >= 0) {
+        // put back: prefer refund paid if we used paid
+        // simple: if free was full use, we already know; just give back 1 to paid if free is 0
+        // easiest: give 1 back to paid if freeLeft()==0 else give back free
+        if (getNum("bg_free_used") > 0 && freeLeft() < FREE_EACH_MONTH) {
+          // we may have used free; undo one free if paid was untouched - approximate refund to paid to be safe
+          localStorage.setItem("bg_paid", String(paidLeft() + 1));
+        }
+      }
+    }
+    render();
+  };
+</script>
+</body>
+</html>
