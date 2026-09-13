@@ -36,6 +36,8 @@
     pointer-events: none;
   }
   #hud .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
+  #hud .subtitle { font-weight: bold; color: #7fd67f; font-size: 0.85rem; margin-top: 6px; }
+  #animals { font-size: 0.8rem; line-height: 1.4; }
   #hidden-badge {
     display: none;
     position: fixed;
@@ -72,6 +74,8 @@
   <div id="coords">x: 0, y: 0</div>
   <div id="berries">🫐 Berries: 0</div>
   <div id="shrooms">🍄 Mushrooms: 0</div>
+  <div class="subtitle">🐾 Animals</div>
+  <div id="animals">…</div>
 </div>
 <div id="hidden-badge">🤫 Hidden!</div>
 <div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
@@ -2746,6 +2750,8 @@ var coordsEl = document.getElementById('coords');
 var berriesEl = document.getElementById('berries');
 var hiddenEl = document.getElementById('hidden-badge');
 var shroomsEl = document.getElementById('shrooms');
+var animalsEl = document.getElementById('animals');
+var animalCountT = 99; // refresh the animal counts every 15s (starts high so it fills in on the first frame)
 
 function treeScale(tx, ty) { return 1.8 + hash2(tx, ty, 41) * 0.4; } // 1.8 - 2.2x
 function acaciaScale(tx, ty) { return 2.0 + hash2(tx, ty, 701) * 0.6; } // 2.0 - 2.6x, wide flat umbrellas
@@ -4609,6 +4615,39 @@ function steerReady(e) {
 // Squared stray distance from a home anchor.
 function stray2(e, hx, hy) { var dx = e.x - hx, dy = e.y - hy; return dx * dx + dy * dy; }
 
+// Rebuild the animal-count list in the side bar (called every 15s)
+function updateAnimalCounts() {
+  var rows = [
+    ['🐰 Rabbits', bunnies.length],
+    ['🐇 Jackrabbits', jacks.length],
+    ['🦆 Ducks', ducks.length],
+    ['🐟 Fish', fishes.length],
+    ['🦔 Hedgehogs', hedgehogs.length],
+    ['🐗 Warthogs', warthogs.length],
+    ['🐺 Hyenas', hyenas.length],
+    ['🐻 Bears', grizzlies.length],
+    ['🐾 Armadillos', armadillos.length],
+    ['🦎 Lizards', lizards.length],
+    ['🕷️ Tarantulas', tarantulas.length],
+    ['🐜 Ants', ants.length],
+    ['🐸 Frogs', frogs.length],
+    ['🐊 Gators', gators.length],
+    ['🐍 Snakes', snakes.length],
+    ['🦅 Eagles', eagles.length],
+    ['🪶 Hawks', hawks.length],
+    ['🦉 Snowy owls', snowyOwls.length],
+    ['🦅 Vultures', vultures.length],
+    ['🕊️ Seagulls', seagulls.length],
+    ['🐢 Sea turtles', seaTurtles.length],
+    ['🐬 Dolphins', dolphins.length],
+    ['🦀 Crabs', crabHoles.length],
+    ['🐉 Dragon', dragon ? 1 : 0],
+    ['🐦 Secretary bird', secretary ? 1 : 0]
+  ];
+  var html = '';
+  for (var i = 0; i < rows.length; i++) html += rows[i][0] + ': ' + rows[i][1] + '<br>';
+  animalsEl.innerHTML = html;
+}
 function update(dt) {
   var dx = 0, dy = 0;
   if (keys['a'] || keys['arrowleft']) dx -= 1;
@@ -7978,6 +8017,8 @@ function update(dt) {
     }
   }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
+  animalCountT += dt;
+  if (animalCountT >= 15) { animalCountT = 0; updateAnimalCounts(); }
 }
 
 // ---------- Drawing ----------
