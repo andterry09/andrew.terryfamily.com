@@ -74,7 +74,7 @@
       </div>
       <button id="go" disabled>Remove background</button><br>
       <button type="button" id="sample" style="background:none;border:1px solid #cbd5e1;border-radius:999px;padding:8px 18px;cursor:pointer;color:#475569;margin-top:4px;">Try a sample photo instead</button>
-      <p class="fine">Screenshots work too — press Cmd+Ctrl+Shift+4, then paste (Cmd+V) right here.</p>
+      <p class="fine">Best on photos of one person, pet, or product. Busy game screenshots have no single subject to cut out.<br>Screenshots work too — press Cmd+Ctrl+Shift+4, then paste (Cmd+V) right here.</p>
     </div>
 
     <div class="card">
@@ -191,6 +191,21 @@
     c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
     return await new Promise((res) => c.toBlob(res, "image/png"));
   }
+  async function fractionTransparent(blob) {
+    try {
+      const bmp = await createImageBitmap(blob);
+      const w = Math.min(bmp.width, 200);
+      const h = Math.max(1, Math.round((bmp.height * w) / bmp.width));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(bmp, 0, 0, w, h);
+      const d = ctx.getImageData(0, 0, w, h).data;
+      let clear = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] < 128) clear++;
+      return clear / (d.length / 4);
+    } catch (e) { return 1; }
+  }
 
   goBtn.onclick = async () => {
     if (!fileBlob) return;
@@ -259,7 +274,13 @@
       } else {
         shareBtn.style.display = "none";
       }
-      statusEl.textContent = "Done! Download below, or Save to Photos.";
+      statusEl.textContent = "Checking the result…";
+      const cleared = await fractionTransparent(outBlob);
+      if (cleared < 0.05) {
+        statusEl.textContent = "Done, but no single subject was found so the whole photo was kept. Try a photo of one person, pet, or product.";
+      } else {
+        statusEl.textContent = "Done! Download below, or Save to Photos.";
+      }
     } catch (err) {
       clearInterval(stallTimer);
       console.error(err);
