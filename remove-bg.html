@@ -23,8 +23,9 @@
     #drop .big { font-size:1.05rem; font-weight:700; }
     #drop .sub { color:#6b7a90; font-size:.9rem; margin:6px 0 14px; }
     #pickbtn { display:inline-block; background:linear-gradient(90deg,#6366f1,#0ea5e9); color:#fff; font-weight:700; padding:12px 24px; border-radius:12px; border:none; cursor:pointer; font-size:1rem; }
-    #file { display:block; margin:12px auto 0; max-width:100%; }
+    #file { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
     #filename { margin-top:10px; font-size:.85rem; color:#475569; }
+    #boxpreview { display:none; max-width:100%; max-height:220px; border-radius:12px; margin:12px auto 0; background:#fff; border:1px solid #e2e8f0; }
     #go { width:100%; margin-top:14px; border:none; border-radius:14px; padding:16px; font-size:1.05rem; font-weight:800; color:#fff; background:linear-gradient(90deg,#22c55e,#0ea5e9); cursor:pointer; }
     #go:disabled { background:#cbd5e1; cursor:not-allowed; }
     #status { text-align:center; min-height:24px; color:#475569; margin:4px 0 0; font-size:.95rem; }
@@ -67,11 +68,12 @@
 
     <div class="card">
       <div id="drop">
-        <div class="big">Drag &amp; drop your photo here</div>
-        <div class="sub">or use the button below · JPG or PNG works best</div>
-        <button type="button" id="pickbtn">Choose from Photo Library</button>
-        <div id="filename"></div>
+        <div class="big">Pick a photo from your Photo Library</div>
+        <div class="sub">Tap the button · JPG or PNG works best</div>
+        <label id="pickbtn" for="file">Choose from Photo Library</label>
         <input type="file" id="file" accept="image/*">
+        <div id="filename"></div>
+        <img id="boxpreview" alt="Your picked photo">
       </div>
       <button id="go" disabled>Remove background</button>
     </div>
@@ -146,23 +148,15 @@
   document.getElementById("buy150").onclick = (e) => { e.preventDefault(); localStorage.setItem("bg_paid", String(paidLeft() + 150)); render(); statusEl.textContent = "Test: added 150 uses. No charge."; };
   document.getElementById("reset").onclick = () => { localStorage.setItem("bg_free_used", "0"); localStorage.setItem("bg_paid", "0"); render(); statusEl.textContent = "Test reset. You have 4 free again."; };
 
-  const dropEl = document.getElementById("drop");
-  document.getElementById("pickbtn").onclick = () => { fileEl.click(); };
-  dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("over"); });
-  dropEl.addEventListener("dragleave", () => dropEl.classList.remove("over"));
-  dropEl.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropEl.classList.remove("over");
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      fileEl.files = e.dataTransfer.files;
-      fileEl.dispatchEvent(new Event("change"));
-    }
-  });
+  // Tapping the "Choose from Photo Library" label opens the picker natively (no JS click needed).
 
   fileEl.onchange = () => {
     fileBlob = fileEl.files[0] || null;
     if (fileBlob) {
-      document.getElementById("before").src = URL.createObjectURL(fileBlob);
+      const url = URL.createObjectURL(fileBlob);
+      document.getElementById("before").src = url;
+      const preview = document.getElementById("boxpreview");
+      preview.src = url; preview.style.display = "block";
       fileNameEl.textContent = "Picked: " + fileBlob.name;
     }
     statusEl.textContent = "";
