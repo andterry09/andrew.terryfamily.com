@@ -1138,13 +1138,40 @@ function generate(s) {
       if (!inBounds(vcx, vcy)) break;
       var vli = idx(vcx, vcy);
       if (biome[vli] === OCEAN) break; // rivers stop at the sea
-      if (biome[vli] === GRASS || biome[vli] === SAND) setLava(vcx, vcy);
+      if (biome[vli] === WATER && !lava[vli]) break; // rivers stop at ponds and lakes too
+      if (biome[vli] === GRASS || biome[vli] === SAND) {
+        if (!setLava(vcx, vcy)) break; // refused beside water: end the river, keep the buffer
+      }
       if (hash2(vri * 17 + vrs, 41, seed + 888) < 0.5) { // widen to two tiles
         var vwx = vcx + Math.round(-Math.sin(vang)), vwy = vcy + Math.round(Math.cos(vang));
         if (inBounds(vwx, vwy)) {
           var vwi = idx(vwx, vwy);
           if ((biome[vwi] === GRASS || biome[vwi] === SAND) && biome[vwi] !== OCEAN) setLava(vwx, vwy);
         }
+      }
+    }
+  }
+  // Safety net: any lava tile left beside real water (8 sides) cools
+  // back into land, so lava never touches water anywhere on the map.
+  // One pass is enough — turning lava to land can't create new contact.
+  for (y = 0; y < H; y++) {
+    for (x = 0; x < W; x++) {
+      var sli = idx(x, y);
+      if (!lava[sli]) continue;
+      var wet = false, sea = false;
+      for (var sly = -1; sly <= 1 && !wet; sly++) {
+        for (var slx = -1; slx <= 1; slx++) {
+          if (!slx && !sly) continue;
+          if (!inBounds(x + slx, y + sly)) continue;
+          var sln = idx(x + slx, y + sly);
+          if (biome[sln] === OCEAN) { wet = true; sea = true; break; }
+          if (biome[sln] === WATER && !lava[sln]) { wet = true; break; }
+        }
+      }
+      if (wet) {
+        lava[sli] = 0;
+        biome[sli] = sea ? SAND : GRASS; // cooled rock reads as beach by the sea
+        elev[sli] = WATER_LEVEL + 0.03;
       }
     }
   }
@@ -1222,7 +1249,7 @@ function generate(s) {
           var fnx = fc[0] + fdirs[fdi][0], fny = fc[1] + fdirs[fdi][1];
           if (!inBounds(fnx, fny)) continue;
           var fni = idx(fnx, fny);
-          if (biome[fni] !== WATER || mud[fni] || fseen[fni]) continue;
+          if (biome[fni] !== WATER || mud[fni] || lava[fni] || fseen[fni]) continue;
           fseen[fni] = 1;
           fq.push([fnx, fny]);
         }
@@ -2761,12 +2788,25 @@ function volcanoAt(x, y) {
   return dx * dx + dy * dy < 1;
 }
 // Flood one tile with lava, scrubbing any region flags off it (a lava
-// tile is lava, not savanna/desert/swamp/mud anymore)
+// tile is lava, not savanna/desert/swamp/mud anymore). Lava never touches
+// water: real-water tiles and tiles beside them (8 sides) are refused, so
+// every lava field keeps a one-tile land buffer. Returns false if refused.
 function setLava(tx, ty) {
   var li = idx(tx, ty);
+  if (biome[li] === OCEAN || (biome[li] === WATER && !lava[li])) return false;
+  for (var loy = -1; loy <= 1; loy++) {
+    for (var lox = -1; lox <= 1; lox++) {
+      if (!lox && !loy) continue;
+      var lnx = tx + lox, lny = ty + loy;
+      if (!inBounds(lnx, lny)) continue;
+      var lni = idx(lnx, lny);
+      if (biome[lni] === OCEAN || (biome[lni] === WATER && !lava[lni])) return false;
+    }
+  }
   biome[li] = WATER; lava[li] = 1;
   swp[li] = 0; sav[li] = 0; des[li] = 0; mud[li] = 0;
   elev[li] = WATER_LEVEL - 0.05 - hash2(tx, ty, seed + 887) * 0.05;
+  return true;
 }
 // Heading directly away from nearby lava (radius r tiles), or null when
 // clear — animals use it to keep their distance
@@ -9338,7 +9378,7 @@ function drawGrizzly(gz, t) {
   // Big grizzly from above: uses bear.png if you put one next to
   // mope-survival.html (transparent PNG facing downward works best),
   // otherwise the built-in canvas drawing below.
-  var sc = gz.sc;
+  var sc = gz.sc * 1.15; // a little bigger
   var gulping = gz.state === 'gulp' ? Math.max(0, gz.gulpT / 2.5) : 0;
   if (typeof bearImgOk !== 'undefined' && bearImgOk) {
     // picture bear, animated: soft waddle while walking/hunting plus a
@@ -10802,10 +10842,10 @@ function drawPlayer(sx, sy, t) {
     ctx.save();
     ctx.translate(sx, sy + bob * 0.4);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(0, 9 - bob * 0.4, 8, 3.5, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 11 - bob * 0.4, 12, 5, 0, 0, 7); ctx.fill();
     var heading = Math.atan2(player.fy, player.fx);
     ctx.rotate(heading - Math.PI / 2);
-    var S = player.r * 2 + 8;
+    var S = (player.r * 2 + 8) * 1.5;
     var dw = S, dh = S * playerImg.height / playerImg.width;
     ctx.drawImage(playerImg, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
