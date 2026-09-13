@@ -25,7 +25,7 @@
     small { color:#bbb; }
     #drop { border:2px dashed #4caf50; border-radius:14px; padding:30px 15px; margin:15px 0; cursor:pointer; background:#0005; }
     #drop:hover { background:#0008; border-color:#ffd700; }
-    #drop input { display:none; }
+    #drop input { margin-top:12px; }
   </style>
   <script type="importmap">
     { "imports": { "@imgly/background-removal": "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs" } }
@@ -41,7 +41,7 @@
     <div class="credits" id="credits">...</div>
     <div id="status"></div>
 
-    <label id="drop">Drop photo here or click to pick a photo<input type="file" id="file" accept="image/*"></label><br>
+    <label id="drop">Drop photo here or<br><span class="buy" id="pickbtn">Choose from Photo Library</span><br><input type="file" id="file" accept="image/*"></label><br>
     <button id="go" disabled>Remove background (unlimited test)</button>
 
     <div class="row">
@@ -114,6 +114,7 @@
 
   // drag + drop onto the box
   const dropEl = document.getElementById("drop");
+  document.getElementById("pickbtn").onclick = (e) => { e.preventDefault(); fileEl.click(); };
   dropEl.addEventListener("dragover", (e) => { e.preventDefault(); });
   dropEl.addEventListener("drop", (e) => {
     e.preventDefault();
