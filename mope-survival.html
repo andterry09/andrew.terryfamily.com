@@ -2718,12 +2718,14 @@ canvas.addEventListener('touchstart', function (e) {
   var t = e.changedTouches[0];
   joy.active = true; joy.id = t.identifier;
   joy.bx = t.clientX; joy.by = t.clientY; joy.dx = 0; joy.dy = 0;
+  mouseSX = t.clientX; mouseSY = t.clientY;
 }, { passive: false });
 canvas.addEventListener('touchmove', function (e) {
   e.preventDefault();
   for (var i = 0; i < e.changedTouches.length; i++) {
     var t = e.changedTouches[i];
     if (t.identifier !== joy.id) continue;
+    mouseSX = t.clientX; mouseSY = t.clientY;
     var dx = t.clientX - joy.bx, dy = t.clientY - joy.by;
     var len = Math.hypot(dx, dy), max = 55;
     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
@@ -2740,9 +2742,25 @@ function joyEnd(e) {
 canvas.addEventListener('touchend', joyEnd);
 canvas.addEventListener('touchcancel', joyEnd);
 
+// Pointer facing: the player always looks toward the mouse (or touch
+// point), not the walk direction. Stored in screen px and converted to
+// world coordinates in drawPlayer. Stays negative until the first pointer
+// input, while the player faces the walk direction instead.
+var mouseSX = -1, mouseSY = -1;
+window.addEventListener('mousemove', function (e) { mouseSX = e.clientX; mouseSY = e.clientY; });
+
 // ---------- Player ----------
 var player = { x: 0, y: 0, r: 9, fx: 0, fy: 1 };
 var spawnTile = generate(seed);
+// Exact population targets: every species stays at its starting count.
+// Births stop at the target and the audits below top newcomers straight
+// back up, so when one dies another spawns and counts never change.
+var BUNNY_T = bunnies.length, JACK_T = jacks.length, HEDGE_T = hedgehogs.length;
+var SNOWHOG_T = 0;
+for (var shtC = 0; shtC < hedgehogs.length; shtC++) if (hedgehogs[shtC].snow) SNOWHOG_T++;
+var ANT_T = ants.length, DUCK_T = ducks.length;
+var PONDFISH_T = 0, SEAFISH_T = 0;
+for (var sftC = 0; sftC < fishes.length; sftC++) { if (fishes[sftC].sea) SEAFISH_T++; else PONDFISH_T++; }
 player.x = (spawnTile.x + 0.5) * TILE;
 player.y = (spawnTile.y + 0.5) * TILE;
 var cam = { x: 0, y: 0 };
@@ -4936,28 +4954,27 @@ function update(dt) {
       }
     }
   }
-  // Keep fish above the minimums: 35+ pond/lake, 67+ ocean at all times
+  // Fish stay exactly at their starting counts: PONDFISH_T pond/lake, SEAFISH_T ocean
   fishCheckT += dt;
   if (fishCheckT > 1) {
     fishCheckT = 0;
     var pondN = 0, seaN = 0;
     for (var fci = 0; fci < fishes.length; fci++) { if (fishes[fci].sea) seaN++; else pondN++; }
     for (var bci2 = 0; bci2 < ducks.length; bci2++) if (ducks[bci2].caught) pondN++; // fish in a beak still counts
-    while (pondN < MIN_POND_FISH && pondFishSpots.length) {
+    while (pondN < PONDFISH_T && pondFishSpots.length) {
       var pspot = pondFishSpots[(Math.random() * pondFishSpots.length) | 0];
       spawnPondFish((pspot % W + 0.5) * TILE, (((pspot / W) | 0) + 0.5) * TILE);
       pondN++;
     }
-    while (seaN < MIN_SEA_FISH && seaFishSpots.length) {
+    while (seaN < SEAFISH_T && seaFishSpots.length) {
       var sspot = seaFishSpots[(Math.random() * seaFishSpots.length) | 0];
       spawnSeaFish((sspot % W + 0.5) * TILE, (((sspot / W) | 0) + 0.5) * TILE);
       seaN++;
     }
   }
   // Ducks: paddle around their pond, sometimes waddle ashore for a bit,
-  // then head back to the water. Chicks grow up, old adults fade away,
-  // nesters raise the next generation. Never more than 50, never fewer
-  // than 25 ducks on the map.
+  // then head back to the water. Chicks grow up, old adults fade away.
+  // Always exactly DUCK_T ducks on the map.
   for (var dki = ducks.length - 1; dki >= 0; dki--) {
     var dk = ducks[dki];
     if (dk.eagleHeld) continue; // snatched by an eagle, dangling in its beak
@@ -5188,13 +5205,13 @@ function update(dt) {
       if (dk.timer <= 0) { dk.state = 'toWater'; dk.timer = 14; }
     }
   }
-  // Nests: eggs hatch over time (when there is room); empty old nests go
+  // Nests: eggs hatch over time (only while below DUCK_T, so ducks stay exact)
   for (var nti = nests.length - 1; nti >= 0; nti--) {
     var nst = nests[nti];
     nst.age += dt;
     for (var neg = nst.eggs.length - 1; neg >= 0; neg--) {
       nst.eggs[neg] += dt;
-      if (nst.eggs[neg] > 60 && ducks.length < 50) { // hatch after ~60s
+      if (nst.eggs[neg] > 60 && ducks.length < DUCK_T) { // hatch after ~60s
         nst.eggs.splice(neg, 1);
         hatchChick(nst);
       }
@@ -5204,18 +5221,18 @@ function update(dt) {
       nests.splice(nti, 1);
     }
   }
-  // Never fewer than 25 ducks: newcomers paddle straight into open ponds
+  // Always exactly DUCK_T ducks: newcomers paddle straight into open ponds
   duckCheckT += dt;
   if (duckCheckT > 1) {
     duckCheckT = 0;
-    while (ducks.length < 25 && duckSpots.length) {
+    while (ducks.length < DUCK_T && duckSpots.length) {
       var mspot = duckSpots[(Math.random() * duckSpots.length) | 0];
       spawnDuck((mspot % W + 0.5) * TILE, (((mspot / W) | 0) + 0.5) * TILE);
     }
   }
   // Bunnies: hop around the fields, raid berry bushes, visit home burrows.
-  // Babies grow up, old ones fade away after 3 minutes. Between 20 and
-  // 50 bunnies on the map.
+  // Babies grow up, old ones fade away after 3 minutes. Always exactly
+  // BUNNY_T bunnies on the map.
   for (var bki = bunnies.length - 1; bki >= 0; bki--) {
     var bn = bunnies[bki];
     if (bn.state === 'caught') continue; // snatched by an owl, dangling in its talons
@@ -5310,30 +5327,30 @@ function update(dt) {
       }
     }
   }
-  // Burrows: every so often 1-2 new babies pop out (max 50 bunnies)
+  // Burrows: every so often 1-2 new babies pop out (stays at BUNNY_T)
   for (var bwi = 0; bwi < burrows.length; bwi++) {
     var bw = burrows[bwi];
     bw.breedT -= dt;
     if (bw.breedT <= 0) {
       bw.breedT = 50 + Math.random() * 40;
-      if (bunnies.length < 50) {
+      if (bunnies.length < BUNNY_T) {
         var nb2 = 1 + ((Math.random() * 2) | 0);
-        while (nb2-- > 0 && bunnies.length < 50) spawnBunny(bw, true);
+        while (nb2-- > 0 && bunnies.length < BUNNY_T) spawnBunny(bw, true);
       }
     }
   }
-  // Never fewer than 20 bunnies: newcomers move into existing burrows
+  // Always exactly BUNNY_T bunnies: newcomers move into existing burrows
   bunCheckT += dt;
   if (bunCheckT > 1) {
     bunCheckT = 0;
-    while (bunnies.length < 20 && burrows.length) {
+    while (bunnies.length < BUNNY_T && burrows.length) {
       spawnBunny(burrows[(Math.random() * burrows.length) | 0], false);
     }
   }
   // Hedgehogs: waddle the forest, munch stump mushrooms, nap on stumps.
-  // Babies grow up, old ones fade after 5 minutes. 29-50 on the map, plus
-  // 10+ white ones that do the same thing up in the snow (they never leave
-  // it, and there are no stumps up there so they just wander).
+  // Babies grow up, old ones fade after 5 minutes. Always exactly HEDGE_T
+  // on the map (SNOWHOG_T of them white ones up in the snow — they never
+  // leave it, and there are no stumps up there so they just wander).
   // Two bumping into each other make a baby.
   for (var hki = hedgehogs.length - 1; hki >= 0; hki--) {
     var hg = hedgehogs[hki];
@@ -5441,8 +5458,8 @@ function update(dt) {
       }
     }
   }
-  // Two hedgehogs bumping into each other make a baby (max 50)
-  if (hedgehogs.length < MAX_HEDGE) {
+  // Two hedgehogs bumping into each other make a baby (stays at HEDGE_T)
+  if (hedgehogs.length < HEDGE_T) {
     for (var ha = 0; ha < hedgehogs.length; ha++) {
       var hga = hedgehogs[ha];
       if (hga.baby || hga.state === 'dying' || hga.state === 'nap' || hga.state === 'toNap') continue;
@@ -5456,29 +5473,32 @@ function update(dt) {
           hga.breedCd = 40 + Math.random() * 30;
           hgb.breedCd = 40 + Math.random() * 30;
           spawnHedgehog((hga.x + hgb.x) / 2, (hga.y + hgb.y) / 2, true, hga.snow && hgb.snow); // white parents make white babies
-          if (hedgehogs.length >= MAX_HEDGE) break;
+          if (hedgehogs.length >= HEDGE_T) break;
           break;
         }
       }
-      if (hedgehogs.length >= MAX_HEDGE) break;
+      if (hedgehogs.length >= HEDGE_T) break;
     }
   }
-  // Never fewer than 29 hedgehogs: newcomers wander in from the forest
+  // Always exactly HEDGE_T hedgehogs: newcomers wander in from the forest
+  // (only when the snowy crew is whole, so a snowy death isn't filled twice)
   hedgeCheckT += dt;
   if (hedgeCheckT > 1) {
     hedgeCheckT = 0;
-    while (hedgehogs.length < MIN_HEDGE && hedgeSpots.length) {
+    var shc2 = 0;
+    for (var shc3 = 0; shc3 < hedgehogs.length; shc3++) if (hedgehogs[shc3].snow) shc2++;
+    while (hedgehogs.length < HEDGE_T && shc2 >= SNOWHOG_T && hedgeSpots.length) {
       var hs3 = hedgeSpots[(Math.random() * hedgeSpots.length) | 0];
       spawnHedgehog((hs3 % W + 0.5) * TILE, (((hs3 / W) | 0) + 0.5) * TILE, false);
     }
   }
-  // Never fewer than 10 snowy hedgehogs: newcomers wander in from the snowfield
+  // Always exactly SNOWHOG_T snowy hedgehogs: newcomers wander in from the snowfield
   var snowHogCount = 0;
   for (var shc = 0; shc < hedgehogs.length; shc++) if (hedgehogs[shc].snow) snowHogCount++;
   snowHogCheckT += dt;
   if (snowHogCheckT > 1) {
     snowHogCheckT = 0;
-    while (snowHogCount < MIN_SNOW_HOG && snowHogSpots.length) {
+    while (snowHogCount < SNOWHOG_T && snowHogSpots.length) {
       var shs3 = snowHogSpots[(Math.random() * snowHogSpots.length) | 0];
       spawnHedgehog((shs3 % W + 0.5) * TILE, (((shs3 / W) | 0) + 0.5) * TILE, false, true);
       snowHogCount++;
@@ -6225,18 +6245,18 @@ function update(dt) {
       if (Math.hypot(an.x - anox, an.y - anoy) < 100 * dt * 0.3) { an.heading = lavaSafeHeading(an.x, an.y, 3); an.resting = true; an.timer = 0.3; }
     }
   }
-  // Never fewer than 15 ants scurrying about the rocks
+  // Always exactly ANT_T ants scurrying about the rocks
   antCheckT += dt;
   if (antCheckT > 1) {
     antCheckT = 0;
-    while (ants.length < ANT_MIN) {
+    while (ants.length < ANT_T) {
       var anBefore = ants.length;
       spawnAnt();
       if (ants.length === anBefore) break;
     }
   }
   // Jackrabbits: desert bunnies with big ears. They hop, visit home, raise
-  // babies — but never eat anything. Between 30 and 60 on the map.
+  // babies — but never eat anything. Always exactly JACK_T on the map.
   for (var jki = jacks.length - 1; jki >= 0; jki--) {
     var jk = jacks[jki];
     if (jk.state === 'caught') continue; // pinned in a snake's jaws, can't move
@@ -6318,17 +6338,17 @@ function update(dt) {
     jbw.breedT -= dt;
     if (jbw.breedT <= 0) {
       jbw.breedT = 50 + Math.random() * 40;
-      if (jacks.length < JACK_MAX) {
+      if (jacks.length < JACK_T) {
         var jnb = 1 + ((Math.random() * 2) | 0);
-        while (jnb-- > 0 && jacks.length < JACK_MAX) spawnJack(jbw, true);
+        while (jnb-- > 0 && jacks.length < JACK_T) spawnJack(jbw, true);
       }
     }
   }
-  // Never fewer than 20 jackrabbits
+  // Always exactly JACK_T jackrabbits
   jackCheckT += dt;
   if (jackCheckT > 1) {
     jackCheckT = 0;
-    while (jacks.length < JACK_MIN && jackBurrows.length) {
+    while (jacks.length < JACK_T && jackBurrows.length) {
       spawnJack(jackBurrows[(Math.random() * jackBurrows.length) | 0], false);
     }
   }
@@ -10879,12 +10899,22 @@ function drawPlayer(sx, sy, t) {
   // Uses player.svg if it loaded, otherwise the built-in blue circle.
   ctx.globalAlpha = playerA;
   var bob = Math.sin(t / 130) * 1.2;
+  // Look toward the pointer when one is known, else toward movement
+  var ldx = player.fx, ldy = player.fy;
+  if (mouseSX >= 0) {
+    var mwx = cam.x + mouseSX / ZOOM, mwy = cam.y + mouseSY / ZOOM;
+    var mdx = mwx - sx, mdy = mwy - sy;
+    if (mdx * mdx + mdy * mdy > 4) {
+      var mlen = Math.hypot(mdx, mdy);
+      ldx = mdx / mlen; ldy = mdy / mlen;
+    }
+  }
   if (typeof playerImgOk !== 'undefined' && playerImgOk) {
     ctx.save();
     ctx.translate(sx, sy + bob * 0.4);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath(); ctx.ellipse(0, 11 - bob * 0.4, 12, 5, 0, 0, 7); ctx.fill();
-    var heading = Math.atan2(player.fy, player.fx);
+    var heading = Math.atan2(ldy, ldx);
     ctx.rotate(heading - Math.PI / 2);
     var S = (player.r * 2 + 8) * 1.5;
     var dw = S, dh = S * playerImg.height / playerImg.width;
@@ -10899,15 +10929,15 @@ function drawPlayer(sx, sy, t) {
   ctx.strokeStyle = '#0d47a1';
   ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(sx, sy + bob * 0.4, 9, 0, 7); ctx.fill(); ctx.stroke();
-  // eyes look toward movement
-  var ex = -player.fy, ey = player.fx;
-  var cx = sx + player.fx * 3.5, cy = sy + bob * 0.4 + player.fy * 3.5;
+  // eyes look toward the pointer (or movement before any pointer input)
+  var ex = -ldy, ey = ldx;
+  var cx = sx + ldx * 3.5, cy = sy + bob * 0.4 + ldy * 3.5;
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.arc(cx + ex * 3.6, cy + ey * 3.6, 2.6, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(cx - ex * 3.6, cy - ey * 3.6, 2.6, 0, 7); ctx.fill();
   ctx.fillStyle = '#10233f';
-  ctx.beginPath(); ctx.arc(cx + ex * 3.6 + player.fx, cy + ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx - ex * 3.6 + player.fx, cy - ey * 3.6 + player.fy, 1.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + ex * 3.6 + ldx, cy + ey * 3.6 + ldy, 1.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx - ex * 3.6 + ldx, cy - ey * 3.6 + ldy, 1.3, 0, 7); ctx.fill();
   ctx.globalAlpha = 1;
 }
 
