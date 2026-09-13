@@ -1713,7 +1713,7 @@ function generate(s) {
     stumpTries++;
     var qx = (rand() * W) | 0, qy = (rand() * H) | 0;
     var qi = idx(qx, qy);
-    if (biome[qi] !== GRASS || snow[qi] || trees[qi] || bushes[qi] || stumps[qi] || rock[qi] || volc[qi]) continue;
+    if (biome[qi] !== GRASS || snow[qi] || sav[qi] || trees[qi] || bushes[qi] || stumps[qi] || rock[qi] || volc[qi]) continue;
     var qdx = qx - spawn.x, qdy = qy - spawn.y;
     if (qdx * qdx + qdy * qdy < 64) continue;
     if (fbm(qx * 0.03 + 300, qy * 0.03 + 300, 3) <= 0.54) continue;
@@ -2927,6 +2927,7 @@ function spawnHedgehog(x, y, baby, snowHog) {
     state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
     stx: -1, sty: -1,
     sc: baby ? 0.5 : gsc, gsc: gsc,
+    hx: x, hy: y, // home anchor for roam-and-return
     snow: !!snowHog,
     baby: !!baby, age: 0, lifespan: 300, deathT: 0, fade: 1, nibT: 0,
     craveT: 10 + Math.random() * 15, napT: 25 + Math.random() * 30,
@@ -3000,6 +3001,7 @@ function spawnWarthog(x, y) {
     state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
     stx: -1, sty: -1, mtx: -1, mty: -1,
     sc: gsc, nibT: 0, splashT: 0, muddyT: 0,
+    hx: x, hy: y, // home anchor for roam-and-return
     craveT: 10 + Math.random() * 15, mudT: 20 + Math.random() * 25,
     hp: 5, maxHp: 5
   });
@@ -3011,6 +3013,7 @@ function spawnArmadillo(x, y) {
     x: x + (Math.random() - 0.5) * 16, y: y + (Math.random() - 0.5) * 16,
     heading: Math.random() * Math.PI * 2,
     state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
+    hx: x, hy: y, // home anchor for roam-and-return
     sc: gsc
   });
 }
@@ -3066,18 +3069,19 @@ function spawnGrizzly(x, y) {
     heading: Math.random() * Math.PI * 2,
     state: 'walk', timer: 0.5 + Math.random() * 1.5, resting: true,
     sc: gsc, step: Math.random() * 10,
+    hx: x, hy: y, // home anchor for roam-and-return
     prey: null, biteT: 0, gulpT: 0,
     huntCd: 10 + Math.random() * 15
   });
 }
-// True if a grizzly can't amble there: temperate plains/forest grass only —
-// no desert, snow, swamp, volcano, rock flat or savanna — plus walls/trunks.
+// True if a grizzly can't amble there: grassland only, any region — they
+// roam out of the plains but amble home when too far. Water, beaches and
+// lava stay blocked, plus walls/trunks.
 function grizBlocked(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
   if (!inBounds(tx, ty)) return true;
   var i = idx(tx, ty);
   if (biome[i] !== GRASS) return true;
-  if (snow[i] || sav[i] || des[i] || swp[i] || volc[i] || rock[i]) return true;
   return hitsSolid(px, py);
 }
 // One amble forward; returns false if something stopped it
@@ -3120,11 +3124,16 @@ function spawnLizard(home) {  var gsc = 0.9 + Math.random() * 0.3;
     home: home
   });
 }
-// True if a lizard can't dart there (rock flat only, plus walls and boulders)
+// True if a lizard can't dart there: the rock flat and nearby grass/sand
+// (they roam out but dart home when too far), plus walls and boulders.
+// Water — lava included — stays blocked.
 function rockBlocked(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
   if (!inBounds(tx, ty)) return true;
-  if (!rock[idx(tx, ty)]) return true;
+  var ri = idx(tx, ty);
+  var rb = biome[ri];
+  if (rb === WATER || rb === OCEAN) return true;
+  if (!rock[ri] && rb !== GRASS && rb !== SAND) return true;
   return hitsSolid(px, py);
 }
 // One dart forward; returns false if something stopped it
@@ -3145,17 +3154,20 @@ function spawnFrog(x, y) {
     heading: Math.random() * Math.PI * 2,
     state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
     sc: gsc, kind: (Math.random() * 3) | 0,
+    hx: x, hy: y, // home anchor for roam-and-return
     step: Math.random() * 10, croak: Math.random() * 10
   });
 }
-// True if a frog can't hop there: frogs never leave the swamp (swampy
-// grass or swamp pools only), plus walls, trunks and the sea.
+// True if a frog can't hop there: the swamp and nearby grass (they roam
+// out but hop home when too far), plus walls, trunks and the sea. Ponds
+// and lakes stay blocked.
 function frogBlocked(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
   if (!inBounds(tx, ty)) return true;
   var i = idx(tx, ty);
   if (biome[i] === OCEAN) return true;
-  if (!swp[i]) return true;
+  if (lava[i]) return true;
+  if (!swp[i] && biome[i] !== GRASS) return true;
   return hitsSolid(px, py);
 }
 // One hop forward; returns false if something stopped it
@@ -3227,7 +3239,6 @@ function hogBlocked(px, py) {
   if (b === OCEAN) return true;
   if (b === WATER && !mud[i]) return true;
   if (b !== GRASS && !(b === WATER && mud[i])) return true;
-  if (!sav[i] && !mud[i]) return true;
   return hitsSolid(px, py);
 }
 // One trot forward; returns false if something stopped it
@@ -3306,6 +3317,7 @@ function spawnHyena(x, y) {
     heading: Math.random() * Math.PI * 2,
     state: 'wander', timer: 0.5 + Math.random() * 1.5, resting: true,
     sc: gsc, nibT: 0, step: Math.random() * 10,
+    hx: x, hy: y, // home anchor for roam-and-return
     prey: null, meat: null,
     flank: flanks[hyenas.length % 3],
     huntCd: 3 + Math.random() * 6, biteCd: 0
@@ -3387,13 +3399,14 @@ function spawnJack(home, baby) {
     homeT: 30 + Math.random() * 30
   });
 }
-// True if a jackrabbit can't hop there (desert sand or mud-free flats only,
-// plus walls, trunks and water)
+// True if a jackrabbit can't hop there: needs sand underfoot (any beach
+// or desert — they roam out but hop home when too far), plus walls and
+// trunks. Water stays blocked.
 function jackBlocked(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
   if (!inBounds(tx, ty)) return true;
   var i = idx(tx, ty);
-  if (biome[i] !== SAND || !des[i]) return true;
+  if (biome[i] !== SAND) return true;
   return hitsSolid(px, py);
 }
 // One hop forward; returns false if something stopped the hop
@@ -3414,16 +3427,19 @@ function spawnSnake(x, y) {
     heading: Math.random() * Math.PI * 2,
     state: 'slither', timer: 1 + Math.random() * 2,
     sc: gsc, wig: Math.random() * 10,
+    hx: x, hy: y, // home anchor for roam-and-return
     prey: null, biteT: 0, gulpT: 0,
     huntCd: 6 + Math.random() * 10, homeT: 30 + Math.random() * 30
   });
 }
-// True if a snake can't slither there (stays in the desert)
+// True if a snake can't slither there: roams grass and sand, homing back
+// to the desert when too far. Water and lava stay blocked, plus walls.
 function snakeBlocked(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
   if (!inBounds(tx, ty)) return true;
   var i = idx(tx, ty);
-  if (!des[i]) return true;
+  var b = biome[i];
+  if (b !== GRASS && b !== SAND) return true;
   return hitsSolid(px, py);
 }
 // A vulture soaring over the desert. Wanders to random spots, never lands,
@@ -4191,6 +4207,7 @@ function spawnSecretary() {
     heading: Math.random() * Math.PI * 2,
     state: 'walk', timer: 1 + Math.random() * 2, resting: true,
     sc: gsc,
+    hx: (spot % W + 0.5) * TILE, hy: (((spot / W) | 0) + 0.5) * TILE, // home anchor for roam-and-return
     step: Math.random() * 10,
     prey: null, biteT: 0, gulpT: 0, huntT: 0,
     huntCd: 15 + Math.random() * 20
@@ -4531,6 +4548,26 @@ function hopToTile(o, tile) {
   o.x = (tile % W + 0.5) * TILE;
   o.y = (((tile / W) | 0) + 0.5) * TILE;
 }
+// Roam-and-return: land animals may wander out of their home region, but
+// once one strays too far from home the audit turns it back with
+// steerHome — it faces home and walks, and its own wander code (including
+// obstacle-dodging) carries it the rest of the way. Each steer buys a few
+// seconds of undisturbed walking (homeCd) so the audit can't pin it nose
+// against an obstacle; the audit re-applies until it is back in range.
+function steerHome(e, hx, hy, state, timer) {
+  e.heading = Math.atan2(hy - e.y, hx - e.x);
+  e.state = state;
+  e.resting = false;
+  e.timer = Math.max(timer, 4);
+  e.homeCd = 2;
+}
+// True when a previous steer has run its course and a new one may apply.
+function steerReady(e) {
+  if (e.homeCd > 0) { e.homeCd -= 1; return false; }
+  return true;
+}
+// Squared stray distance from a home anchor.
+function stray2(e, hx, hy) { var dx = e.x - hx, dy = e.y - hy; return dx * dx + dy * dy; }
 
 function update(dt) {
   var dx = 0, dy = 0;
@@ -5671,7 +5708,7 @@ function update(dt) {
         }
       }
       if (!ar.resting) {
-        if (!hogStep(ar, 50, dt)) { // same savanna-only range as the warthogs
+        if (!hogStep(ar, 50, dt)) { // same wide range as the warthogs
           ar.heading = lavaSafeHeading(ar.x, ar.y, 3);
           ar.resting = true;
           ar.timer = 0.5;
@@ -5834,8 +5871,8 @@ function update(dt) {
     }
   }
   // Swamp frogs: hop from hummock to pool and back, pausing to croak with
-  // a pulsing throat. They never leave the swamp, never breed or die —
-  // always exactly 18.
+  // a pulsing throat. They prefer the swamp but hop onto nearby grass, never
+  // breed or die — always exactly 18.
   for (var fri2 = 0; fri2 < frogs.length; fri2++) {
     var fr = frogs[fri2];
     if (fr.state === 'caught') continue; // snatched by an eagle, dangling in its beak
@@ -6055,7 +6092,7 @@ function update(dt) {
       }
     }
     if (!ta.resting) {
-      if (!lizStep(ta, 90, dt)) { // rock flat only, like the lizards
+      if (!lizStep(ta, 90, dt)) { // rock flat and nearby land, like the lizards
         ta.heading = lavaSafeHeading(ta.x, ta.y, 3);
         ta.resting = true;
         ta.timer = 0.5;
@@ -6359,7 +6396,7 @@ function update(dt) {
         // erratic striding: weaves and sometimes veers off mid-stride
         sb.heading += Math.sin(sb.step * 0.7) * 1.4 * dt;
         if (Math.random() < dt * 0.9) sb.heading += (Math.random() - 0.5) * 2.2;
-        if (!jackHop(sb, 105, dt)) { // desert sand only, like the jackrabbits
+        if (!jackHop(sb, 105, dt)) { // sand, like the jackrabbits
           sb.heading = lavaSafeHeading(sb.x, sb.y, 3);
           sb.resting = true;
           sb.timer = 0.5;
@@ -7555,145 +7592,214 @@ function update(dt) {
       spawnEagle(8 + Math.random() * (WORLD_PX - 16), 8 + Math.random() * (WORLD_PY - 16));
     }
   }
-  // Habitat audit, once a second: any animal outside its home biome pops
-  // back into it. Eagles live anywhere, so they are exempt. (Most species
-  // can't wander out on their own — this mainly catches drops far from
-  // home after an eagle carry.)
+  // Habitat audit, once a second: land animals may roam out of their home
+  // region, but strays that wander too far are turned back toward home
+  // (they walk back — no more popping), and any dropped somewhere
+  // impassable (deep water, lava) get rescued home. Eagles live anywhere,
+  // so they are exempt.
   habitatCheckT += dt;
   if (habitatCheckT > 1) {
     habitatCheckT = 0;
     var auT, aui;
     var auBun, auHg, auWt, auAr, auHy, auJk, auSn, auLz, auTa, auAn, auFr, auGa, auDk;
-    // bunnies hop home if strayed far from the burrow
+    // bunnies hop home if strayed far from the burrow (they walk back now
+    // instead of popping home; stranded ones still get rescued)
     for (aui = 0; aui < bunnies.length; aui++) {
       auBun = bunnies[aui];
       if (auBun.state === 'inside' || auBun.state === 'caught' || auBun.state === 'dying') continue;
       var audx = auBun.x - auBun.bx, audy = auBun.y - auBun.by;
       if (audx * audx + audy * audy > 600 * 600) {
-        auBun.x = auBun.bx; auBun.y = auBun.by;
-        auBun.state = 'hop'; auBun.resting = true; auBun.timer = 0.5;
+        var auBunT = habTile(auBun);
+        if (auBunT === -1 || biome[auBunT] === WATER || biome[auBunT] === OCEAN || lava[auBunT]) {
+          auBun.x = auBun.bx; auBun.y = auBun.by;
+          auBun.state = 'hop'; auBun.resting = true; auBun.timer = 0.5;
+        } else if (auBun.state === 'hop') {
+          auBun.state = 'toHome'; auBun.timer = 15;
+        }
       }
     }
-    // hedgehogs: brown ones belong off the snow, white ones on it
+    // hedgehogs keep to their side of the snowline, but may wander out;
+    // far strays amble home, stranded ones get rescued
     for (aui = 0; aui < hedgehogs.length; aui++) {
       auHg = hedgehogs[aui];
       if (auHg.state === 'caught' || auHg.state === 'dying') continue;
       auT = habTile(auHg);
       if (auT === -1) continue;
-      var auSnowBad = auHg.snow ? snow[auT] !== 1 : snow[auT] === 1;
-      if (auSnowBad) {
+      if (biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         var auHgList = auHg.snow ? snowHogSpots : hedgeSpots;
         if (!auHgList.length) continue;
         hopToTile(auHg, auHgList[(Math.random() * auHgList.length) | 0]);
         auHg.state = 'wander'; auHg.resting = true; auHg.timer = 0.5;
+        continue;
+      }
+      var auSnowBad = auHg.snow ? snow[auT] !== 1 : snow[auT] === 1;
+      if (auSnowBad && auHg.state === 'wander' && stray2(auHg, auHg.hx, auHg.hy) > 400 * 400 && steerReady(auHg)) {
+        steerHome(auHg, auHg.hx, auHg.hy, 'wander', 1.5);
       }
     }
-    // warthogs, armadillos and hyenas never leave the savanna
+    // warthogs, armadillos and hyenas roam the savanna and beyond, but far
+    // strays head home; stranded ones get rescued
     for (aui = 0; aui < warthogs.length; aui++) {
       auWt = warthogs[aui];
       auT = habTile(auWt);
-      if (auT === -1 || (!sav[auT] && !mud[auT])) {
+      if (auT === -1 || lava[auT] || ((biome[auT] === WATER || biome[auT] === OCEAN) && !mud[auT])) {
         if (!hogSpots.length) continue;
         hopToTile(auWt, hogSpots[(Math.random() * hogSpots.length) | 0]);
         auWt.state = 'wander'; auWt.resting = true; auWt.timer = 0.5;
+      } else if ((!sav[auT] && !mud[auT]) && auWt.state === 'wander' && stray2(auWt, auWt.hx, auWt.hy) > 450 * 450 && steerReady(auWt)) {
+        steerHome(auWt, auWt.hx, auWt.hy, 'wander', 1.5);
       }
     }
     for (aui = 0; aui < armadillos.length; aui++) {
       auAr = armadillos[aui];
       auT = habTile(auAr);
-      if (auT === -1 || (!sav[auT] && !mud[auT])) {
+      if (auT === -1 || lava[auT] || ((biome[auT] === WATER || biome[auT] === OCEAN) && !mud[auT])) {
         if (!hogSpots.length) continue;
         hopToTile(auAr, hogSpots[(Math.random() * hogSpots.length) | 0]);
         if (auAr.state !== 'curl') { auAr.resting = true; auAr.timer = 0.5; }
+      } else if ((!sav[auT] && !mud[auT]) && auAr.state === 'wander' && stray2(auAr, auAr.hx, auAr.hy) > 450 * 450 && steerReady(auAr)) {
+        steerHome(auAr, auAr.hx, auAr.hy, 'wander', 1.5);
       }
     }
     for (aui = 0; aui < hyenas.length; aui++) {
       auHy = hyenas[aui];
       auT = habTile(auHy);
-      if (auT === -1 || (!sav[auT] && !mud[auT])) {
+      if (auT === -1 || lava[auT] || ((biome[auT] === WATER || biome[auT] === OCEAN) && !mud[auT])) {
         if (!hogSpots.length) continue;
         hopToTile(auHy, hogSpots[(Math.random() * hogSpots.length) | 0]);
         auHy.prey = null; auHy.meat = null; auHy.state = 'wander'; auHy.resting = true; auHy.timer = 0.5;
+      } else if ((!sav[auT] && !mud[auT]) && auHy.state === 'wander' && stray2(auHy, auHy.hx, auHy.hy) > 450 * 450 && steerReady(auHy)) {
+        auHy.prey = null; auHy.meat = null;
+        steerHome(auHy, auHy.hx, auHy.hy, 'wander', 1.5);
       }
     }
-    // jackrabbits hop home if off the desert sand
+    // grizzlies amble the plains but may roam anywhere grassy; far strays
+    // amble home, stranded ones get rescued
+    for (aui = 0; aui < grizzlies.length; aui++) {
+      var auGz = grizzlies[aui];
+      if (auGz.state !== 'walk') continue; // hunting, mauling, gulping: do not disturb
+      auT = habTile(auGz);
+      if (auT === -1 || biome[auT] !== GRASS || lava[auT]) {
+        if (!grizSpots.length) continue;
+        hopToTile(auGz, grizSpots[(Math.random() * grizSpots.length) | 0]);
+        auGz.state = 'walk'; auGz.resting = true; auGz.timer = 0.5;
+      } else if ((snow[auT] || sav[auT] || des[auT] || swp[auT] || volc[auT] || rock[auT]) && auGz.state === 'walk' && stray2(auGz, auGz.hx, auGz.hy) > 550 * 550 && steerReady(auGz)) {
+        steerHome(auGz, auGz.hx, auGz.hy, 'walk', 1.5);
+      }
+    }
+    // jackrabbits roam the sand, but hop home if too far from the burrow;
+    // stranded ones get rescued
     for (aui = 0; aui < jacks.length; aui++) {
       auJk = jacks[aui];
       if (auJk.state === 'caught' || auJk.state === 'dying' || auJk.state === 'inside') continue;
       auT = habTile(auJk);
-      if (auT === -1 || !des[auT]) {
+      if (auT === -1 || biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         if (auJk.home) { auJk.x = auJk.home.x; auJk.y = auJk.home.y; }
         auJk.state = 'hop'; auJk.resting = true; auJk.timer = 0.5;
+      } else if (!des[auT] && auJk.home && auJk.state === 'hop' && stray2(auJk, auJk.home.x, auJk.home.y) > 500 * 500) {
+        auJk.state = 'toHome'; auJk.timer = 15;
       }
     }
-    // rattlesnakes slither back to the desert (freeing any held jackrabbit)
+    // rattlesnakes roam grass and sand, slithering home when too far from
+    // the desert (a held jackrabbit rides along)
     for (aui = 0; aui < snakes.length; aui++) {
       auSn = snakes[aui];
       if (auSn.state === 'caught') continue;
       auT = habTile(auSn);
-      if (auT === -1 || !des[auT]) {
+      if (auT === -1 || biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         if (auSn.prey && auSn.prey.state === 'caught') { auSn.prey.state = 'hop'; auSn.prey.resting = true; auSn.prey.timer = 0.5; }
         auSn.prey = null;
         if (!desSpots.length) continue;
         hopToTile(auSn, desSpots[(Math.random() * desSpots.length) | 0]);
         auSn.state = 'slither'; auSn.timer = 1;
+      } else if (!des[auT] && auSn.state === 'slither' && stray2(auSn, auSn.hx, auSn.hy) > 400 * 400 && steerReady(auSn)) {
+        steerHome(auSn, auSn.hx, auSn.hy, 'slither', 2);
       }
     }
-    // the secretary bird strides home if off the desert (freeing any held snake)
+    // the secretary bird strides the sand and beyond, heading home when
+    // too far (a held snake rides along)
     if (secretary) {
       auT = habTile(secretary);
-      if (auT === -1 || !des[auT]) {
+      if (auT === -1 || biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         if (secretary.prey && snakes.indexOf(secretary.prey) !== -1 && secretary.prey.state === 'caught') secretary.prey.state = 'slither';
         secretary.prey = null;
         if (desSpots.length) hopToTile(secretary, desSpots[(Math.random() * desSpots.length) | 0]);
         secretary.state = 'walk'; secretary.resting = true; secretary.timer = 0.5;
+      } else if (!des[auT] && secretary.state === 'walk' && stray2(secretary, secretary.hx, secretary.hy) > 500 * 500 && steerReady(secretary)) {
+        steerHome(secretary, secretary.hx, secretary.hy, 'walk', 1.5);
       }
     }
-    // lizards dart home if off the rock flat
+    // lizards dart around the flat and nearby land, dashing home when too
+    // far; stranded ones get rescued
     for (aui = 0; aui < lizards.length; aui++) {
       auLz = lizards[aui];
       if (auLz.state === 'hide' || auLz.state === 'caught') continue;
       auT = habTile(auLz);
-      if (auT === -1 || !rock[auT]) {
+      if (auT === -1 || biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         if (auLz.home) { auLz.x = auLz.home.x; auLz.y = auLz.home.y; }
         auLz.state = 'bask'; auLz.resting = true; auLz.timer = 0.5;
+      } else if (!rock[auT] && auLz.home && auLz.state === 'bask' && stray2(auLz, auLz.home.x, auLz.home.y) > 300 * 300) {
+        auLz.tx = auLz.home.x; auLz.ty = auLz.home.y;
+        auLz.heading = Math.atan2(auLz.home.y - auLz.y, auLz.home.x - auLz.x);
+        auLz.state = 'bask'; auLz.resting = false; auLz.timer = 1;
       }
     }
-    // tarantulas scurry home if off the rock flat (freeing any held ant)
+    // tarantulas scurry around the flat and nearby land, hurrying home
+    // when too far (a held ant rides along); stranded ones get rescued
     for (aui = 0; aui < tarantulas.length; aui++) {
       auTa = tarantulas[aui];
       if (auTa.state === 'hide' || auTa.state === 'caught') continue;
       auT = habTile(auTa);
-      if (auT === -1 || !rock[auT]) {
+      if (auT === -1 || biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         if (auTa.prey && ants.indexOf(auTa.prey) !== -1 && auTa.prey.state === 'caught') { auTa.prey.state = 'run'; auTa.prey.resting = true; auTa.prey.timer = 0.3; }
         auTa.prey = null;
         if (auTa.home) { auTa.x = auTa.home.x; auTa.y = auTa.home.y; }
         auTa.state = 'out'; auTa.resting = true; auTa.timer = 0.5;
+      } else if (!rock[auT] && auTa.home && auTa.state === 'out' && stray2(auTa, auTa.home.x, auTa.home.y) > 300 * 300) {
+        auTa.tx = auTa.home.x; auTa.ty = auTa.home.y;
+        auTa.heading = Math.atan2(auTa.home.y - auTa.y, auTa.home.x - auTa.x);
+        auTa.state = 'out'; auTa.resting = false; auTa.timer = 1;
       }
     }
-    // ants skitter back to the rocks (a lizard hole makes a fine landmark)
+    // ants skitter around the rocks and nearby land, hurrying back to a
+    // lizard hole when too far; stranded ones get rescued
     for (aui = 0; aui < ants.length; aui++) {
       auAn = ants[aui];
       if (auAn.state === 'caught') continue;
       auT = habTile(auAn);
-      if (auT === -1 || !rock[auT]) {
+      if (auT === -1 || biome[auT] === WATER || biome[auT] === OCEAN || lava[auT]) {
         if (!lizardHoles.length) continue;
         var auHole = lizardHoles[(Math.random() * lizardHoles.length) | 0];
         auAn.x = auHole.x; auAn.y = auHole.y;
         auAn.state = 'run'; auAn.resting = true; auAn.timer = 0.3;
+      } else if (!rock[auT] && auAn.state === 'run' && lizardHoles.length) {
+        var auNear = lizardHoles[0], auNd = 1e18;
+        for (var auHi = 0; auHi < lizardHoles.length; auHi++) {
+          var auHdx = lizardHoles[auHi].x - auAn.x, auHdy = lizardHoles[auHi].y - auAn.y;
+          var auHd = auHdx * auHdx + auHdy * auHdy;
+          if (auHd < auNd) { auNd = auHd; auNear = lizardHoles[auHi]; }
+        }
+        if (auNd > 250 * 250) {
+          auAn.heading = Math.atan2(auNear.y - auAn.y, auNear.x - auAn.x);
+          auAn.state = 'run'; auAn.resting = false; auAn.timer = 0.5;
+        }
       }
     }
-    // frogs and alligators never leave the swamp
+    // frogs hop around the swamp and nearby grass, hopping home when too
+    // far; stranded ones get rescued
     for (aui = 0; aui < frogs.length; aui++) {
       auFr = frogs[aui];
       if (auFr.state === 'caught') continue;
       auT = habTile(auFr);
-      if (auT === -1 || !swp[auT]) {
+      if (auT === -1 || biome[auT] === OCEAN || lava[auT] || (biome[auT] === WATER && !swp[auT])) {
         if (!frogSpots.length) continue;
         hopToTile(auFr, frogSpots[(Math.random() * frogSpots.length) | 0]);
         auFr.resting = true; auFr.timer = 0.5;
+      } else if (!swp[auT] && auFr.state === 'wander' && stray2(auFr, auFr.hx, auFr.hy) > 250 * 250 && steerReady(auFr)) {
+        steerHome(auFr, auFr.hx, auFr.hy, 'wander', 1);
       }
     }
+    // alligators stay in the swamp (they need the pools to hunt)
     for (aui = 0; aui < gators.length; aui++) {
       auGa = gators[aui];
       auT = habTile(auGa);
@@ -7769,6 +7875,9 @@ function update(dt) {
             if (dpi !== -1) darr.splice(dpi, 1);
             dg.meal = dg.preyKind;
             dg.mealSnow = !!dpr.snow;
+            dg.mealSc = dpr.sc || 1; // remember the catch's look for the jaw meal
+            dg.mealDrake = !!dpr.drake;
+            dg.mealKind = dpr.kind || 0;
             dragonRespawnPrey(dg.meal, dg.mealSnow); // replacement appears at once: the count never dips
             dg.prey = null; dg.preyKind = null;
             dg.gulpT = 2.5;
@@ -8560,6 +8669,26 @@ function drawBunny(bn, t) {
   // Top-down bunny: long ears (they wiggle), round body, tail puff, feet
   // out mid-hop. Babies are the same drawing, just small.
   var sc = bn.sc;
+  // Picture bunny: uses rabbit.png if you put one next to
+  // mope-survival.html (transparent PNG facing downward works best),
+  // otherwise the built-in canvas drawing below.
+  if (typeof bunnyImgOk !== 'undefined' && bunnyImgOk) {
+    // picture bunny, animated: soft wiggle as it hops (shadow and old-age
+    // fade stay just like the canvas one)
+    ctx.save();
+    ctx.translate(bn.x, bn.y);
+    ctx.globalAlpha = bn.fade; // old bunnies fade away
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(0, 1 * sc, 8 * sc, 5.5 * sc, 0, 0, 7); ctx.fill();
+    var bwig = Math.sin(t / 240 + bn.x * 0.1 + bn.y * 0.1) * 0.05;
+    // your picture faces downward, the game faces right: correct by -90°
+    ctx.rotate(bn.heading - Math.PI / 2 + bwig);
+    var bS = sc * 18;
+    var bDw = bS, bDh = bS * bunnyImg.height / bunnyImg.width;
+    ctx.drawImage(bunnyImg, -bDw / 2, -bDh / 2, bDw, bDh);
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.translate(bn.x, bn.y);
   ctx.rotate(bn.heading);
@@ -10228,6 +10357,16 @@ if (typeof Image !== 'undefined') {
   gatorImg.onload = function () { gatorImgOk = true; };
   gatorImg.src = 'gator.png';
 }
+// Optional bunny picture: drop a rabbit.png next to mope-survival.html and
+// the game uses it instead of the built-in drawing (transparent PNG facing
+// downward works best — the game rotates it to face the hop direction).
+// Babies use it too, just small. Until it loads, the canvas bunny shows.
+var bunnyImg = null, bunnyImgOk = false;
+if (typeof Image !== 'undefined') {
+  bunnyImg = new Image();
+  bunnyImg.onload = function () { bunnyImgOk = true; };
+  bunnyImg.src = 'rabbit.png';
+}
 // Optional dragon picture: drop a dragon.png next to world.html and the
 // game uses it instead of the built-in drawing (transparent PNG facing
 // right works best). Until it loads, the canvas dragon shows.
@@ -10237,7 +10376,60 @@ if (typeof Image !== 'undefined') {
   dragonImg.onload = function () { dragonImgOk = true; };
   dragonImg.src = 'dragon.png';
 }
-function drawDragon(dr) {
+// Player picture: player.svg next to mope-survival.html. The game uses it
+// for the character instead of the built-in blue-circle drawing
+// (transparent SVG facing downward works best — the game rotates it to
+// face the walk direction). Until it loads, the canvas player shows.
+var playerImg = null, playerImgOk = false;
+if (typeof Image !== 'undefined') {
+  playerImg = new Image();
+  playerImg.onload = function () { playerImgOk = true; };
+  playerImg.src = 'player.svg';
+}
+// A live meal vanishing into the dragon's jaws: draws the actual animal
+// kind it just snatched (bunny, duck, eagle...) right at the mouth
+// (mx, my), facing fwdAngle. It struggles hard at first, then slides down
+// the throat and shrinks as the gulp finishes.
+function drawDragonMeal(dr, t, mx, my, fwdAngle) {
+  if (dr.state !== 'gulp' || !dr.meal) return;
+  var fprog = Math.max(0, Math.min(1, 1 - dr.gulpT / 2.5));
+  var msc = dr.mealSc > 0 ? dr.mealSc : 1;
+  var struggle = 1 - fprog;
+  var off = (5 * (1 - fprog) - 6 * fprog) * dr.sc; // starts at the lips, ends down the throat
+  var jx = (Math.random() - 0.5) * 4 * dr.sc * struggle; // thrashed side to side
+  var px = mx + Math.cos(fwdAngle) * off - Math.sin(fwdAngle) * jx;
+  var py = my + Math.sin(fwdAngle) * off + Math.cos(fwdAngle) * jx;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(fwdAngle + Math.sin(t * 0.045 + dr.flap * 3) * 0.5 * struggle);
+  var shrink = 1 - fprog * 0.45;
+  ctx.scale(shrink, shrink);
+  ctx.globalAlpha = 1 - fprog * 0.3;
+  var o = { x: 0, y: 0, heading: 0, sc: msc, fade: 1, resting: false };
+  var kind = dr.meal;
+  if (kind === 'bunny') drawBunny(Object.assign({ tone: '#8a6f4d' }, o), t);
+  else if (kind === 'hedge') drawHedgehog(Object.assign({ state: 'wander', snow: !!dr.mealSnow }, o), t);
+  else if (kind === 'warthog') drawWarthog(Object.assign({ state: 'wander', muddyT: 0 }, o), t);
+  else if (kind === 'jack') drawJackrabbit(Object.assign({ tone: '#b99a6b' }, o), t);
+  else if (kind === 'snake') drawSnake(Object.assign({ state: 'slither', wig: 0, gulpT: 0 }, o), t);
+  else if (kind === 'duck') drawDuck(Object.assign({ chick: false, drake: !!dr.mealDrake, state: 'swim', caught: null, carry: null, phase: '', body: '#8a6f4d', head: dr.mealDrake ? '#1f7a3d' : '#6e5739' }, o), t);
+  else if (kind === 'frog') drawFrog(Object.assign({ kind: dr.mealKind || 0, croak: 0, step: 0 }, o), t);
+  else if (kind === 'lizard') drawLizard(Object.assign({ kind: dr.mealKind || 0 }, o), t);
+  else if (kind === 'dillo') drawArmadillo(Object.assign({ state: 'wander' }, o), t);
+  else if (kind === 'tar') drawTarantula(o, t);
+  else if (kind === 'vulture') drawVulture(Object.assign({ state: 'fly', flap: 0 }, o));
+  else if (kind === 'owl') drawSnowyOwl(Object.assign({ state: 'fly', flap: 0 }, o));
+  else if (kind === 'eagle') drawEagle(Object.assign({ state: 'fly', flap: 0, gulpT: 0, prey: null, preyKind: null }, o));
+  else if (kind === 'hawk') drawHawk(Object.assign({ state: 'fly', flap: 0 }, o));
+  else if (kind === 'gull') drawSeagull(Object.assign({ flap: 0 }, o));
+  else if (kind === 'ant') drawAnt(o, t);
+  else { // unknown catch: a small dark lump going down
+    ctx.fillStyle = '#3a2c1e';
+    ctx.beginPath(); ctx.arc(0, 0, 4 * msc, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawDragon(dr, t) {
   // Massive volcano dragon: uses dragon.png if you put one next to
   // world.html (transparent PNG facing right works best), otherwise the
   // built-in canvas drawing below.
@@ -10257,6 +10449,7 @@ function drawDragon(dr) {
     var S = sc * 26 * dswell;
     var dw = S, dh = S * dragonImg.height / dragonImg.width;
     ctx.drawImage(dragonImg, -dw / 2, -dh / 2, dw, dh);
+    drawDragonMeal(dr, t, 0, dh * 0.40, Math.PI / 2); // catch vanishing into the pictured jaws
     ctx.restore();
     return;
   }
@@ -10410,6 +10603,7 @@ function drawDragon(dr) {
   ctx.fillStyle = '#1a0d05';
   ctx.beginPath(); ctx.ellipse(16.5 * sc, -1 * sc, 0.7 * sc, 0.4 * sc, 0.3, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.ellipse(16.5 * sc, 1 * sc, 0.7 * sc, 0.4 * sc, -0.3, 0, 7); ctx.fill();
+  drawDragonMeal(dr, t, 15 * sc, 0, 0); // catch vanishing into the toothy maw
   ctx.restore();
 }
 function drawSeaTurtle(bt) {
@@ -10600,9 +10794,24 @@ function drawDolphin(dl) {
   ctx.restore();
 }
 function drawPlayer(sx, sy, t) {
-  // Small round explorer (smaller than a tree); fades when hiding
+  // Small round explorer (smaller than a tree); fades when hiding.
+  // Uses player.svg if it loaded, otherwise the built-in blue circle.
   ctx.globalAlpha = playerA;
   var bob = Math.sin(t / 130) * 1.2;
+  if (typeof playerImgOk !== 'undefined' && playerImgOk) {
+    ctx.save();
+    ctx.translate(sx, sy + bob * 0.4);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(0, 9 - bob * 0.4, 8, 3.5, 0, 0, 7); ctx.fill();
+    var heading = Math.atan2(player.fy, player.fx);
+    ctx.rotate(heading - Math.PI / 2);
+    var S = player.r * 2 + 8;
+    var dw = S, dh = S * playerImg.height / playerImg.width;
+    ctx.drawImage(playerImg, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    return;
+  }
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath(); ctx.ellipse(sx, sy + 9, 8, 3.5, 0, 0, 7); ctx.fill();
   ctx.fillStyle = '#2196f3';
@@ -11469,7 +11678,7 @@ function render(t, rdt) {
   if (dragon) {
     var dg2 = dragon;
     if (!(dg2.x < cam.x - 200 || dg2.x > cam.x + viewW + 200 || dg2.y < cam.y - 200 || dg2.y > cam.y + viewH + 200)) {
-      drawDragon(dg2);
+      drawDragon(dg2, t);
     }
   }
 
