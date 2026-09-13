@@ -48,9 +48,6 @@
     .fine { text-align:center; color:#8494ab; font-size:.85rem; }
     #reset { background:none; border:1px solid #cbd5e1; border-radius:999px; padding:8px 18px; cursor:pointer; color:#475569; }
   </style>
-  <script type="importmap">
-    { "imports": { "@imgly/background-removal": "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs" } }
-  </script>
 </head>
 <body>
   <div class="topbar">
@@ -100,9 +97,7 @@
     </div>
   </div>
 
-<script type="module">
-  import { removeBackground } from "@imgly/background-removal";
-
+<script>
   const FREE_EACH_MONTH = 4;
   const UNLIMITED_TEST = true; // true = infinite uses while testing
   const now = new Date();
@@ -205,8 +200,17 @@
     }
     render();
 
-    statusEl.textContent = "Starting…";
+    statusEl.textContent = "Loading the AI…";
     goBtn.disabled = true;
+    let removeBackground;
+    try {
+      ({ removeBackground } = await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/browser.mjs"));
+    } catch (impErr) {
+      console.error(impErr);
+      statusEl.textContent = "Could not load the AI. Check your internet, reload the page, or try Chrome.";
+      render();
+      return;
+    }
     let lastProgress = Date.now();
     const stallTimer = setInterval(() => {
       const quiet = Math.round((Date.now() - lastProgress) / 1000);
