@@ -2748,6 +2748,17 @@ canvas.addEventListener('touchcancel', joyEnd);
 // input, while the player faces the walk direction instead.
 var mouseSX = -1, mouseSY = -1;
 window.addEventListener('mousemove', function (e) { mouseSX = e.clientX; mouseSY = e.clientY; });
+var mouseHeld = false, swingCd = 0; // held mouse re-swings 0.3s after each hit ends
+// Clicking down (re)starts the hit animation: player, hit1, hit2, hit3,
+// hit2, hit1, player — while still facing the pointer.
+window.addEventListener('mousedown', function (e) {
+  if (e.button !== undefined && e.button !== 0) return;
+  mouseSX = e.clientX; mouseSY = e.clientY;
+  mouseHeld = true;
+  // Clicks obey the 0.3s cooldown too: only start a swing when idle and cooled down
+  if (swingFrame < 0 && swingCd <= 0) { swingFrame = 0; swingT = 0; }
+});
+window.addEventListener('mouseup', function () { mouseHeld = false; });
 
 // ---------- Player ----------
 var player = { x: 0, y: 0, r: 9, fx: 0, fy: 1 };
@@ -8037,6 +8048,14 @@ function update(dt) {
     }
   }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
+  if (swingFrame >= 0) { // hit animation playing: advance, then rest on player.svg
+    swingT += dt;
+    swingFrame = Math.floor(swingT / SWING_DUR);
+    if (swingFrame >= SWING_SEQ.length) { swingFrame = -1; swingT = 0; swingCd = 0.3; }
+  } else { // idle: cool down, then re-swing while held
+    swingCd -= dt;
+    if (mouseHeld && swingCd <= 0) { swingFrame = 0; swingT = 0; }
+  }
   animalCountT += dt;
   if (animalCountT >= 15) { animalCountT = 0; updateAnimalCounts(); }
 }
@@ -10477,16 +10496,37 @@ if (typeof Image !== 'undefined') {
   dragonImg.onload = function () { dragonImgOk = true; };
   dragonImg.src = 'dragon.png';
 }
-// Player picture: player.svg next to mope-survival.html. The game uses it
-// for the character instead of the built-in blue-circle drawing
-// (transparent SVG facing downward works best — the game rotates it to
-// face the walk direction). Until it loads, the canvas player shows.
+// Player pictures: player.svg plus playerHit1/2/3.svg next to
+// mope-survival.html. The game uses them for the character instead of the
+// built-in blue-circle drawing (transparent SVGs facing downward work best
+// — the game rotates them to face the pointer). Clicking plays the hit
+// animation: player, hit1, hit2, hit3, hit2, hit1, player. Until each
+// loads, that frame falls back to player.svg (then the canvas player).
 var playerImg = null, playerImgOk = false;
+var playerHit1Img = null, playerHit1Ok = false;
+var playerHit2Img = null, playerHit2Ok = false;
+var playerHit3Img = null, playerHit3Ok = false;
+var playerFrameOk = [false, false, false, false];
 if (typeof Image !== 'undefined') {
   playerImg = new Image();
-  playerImg.onload = function () { playerImgOk = true; };
+  playerImg.onload = function () { playerImgOk = true; playerFrameOk[0] = true; };
   playerImg.src = 'player.svg';
+  playerHit1Img = new Image();
+  playerHit1Img.onload = function () { playerHit1Ok = true; playerFrameOk[1] = true; };
+  playerHit1Img.src = 'playerHit1.svg';
+  playerHit2Img = new Image();
+  playerHit2Img.onload = function () { playerHit2Ok = true; playerFrameOk[2] = true; };
+  playerHit2Img.src = 'playerHit2.svg';
+  playerHit3Img = new Image();
+  playerHit3Img.onload = function () { playerHit3Ok = true; playerFrameOk[3] = true; };
+  playerHit3Img.src = 'playerHit3.svg';
 }
+var playerFrameImgs = [playerImg, playerHit1Img, playerHit2Img, playerHit3Img];
+var playerFrameSize = [[107.40052, 98.02492], [106.90952, 104.40797], [106.41852, 109.80901], [103.4725, 118.15607]];
+var FRAME_ANCH_X = 53.70026, FRAME_ANCH_Y = 49.01246; // body center, same paper spot in every frame
+var SWING_SEQ = [0, 1, 2, 3, 2, 1, 0]; // hit animation frames, ends resting on player
+var SWING_DUR = 0.07; // seconds per frame: medium-fast swing
+var swingFrame = -1, swingT = 0; // swingFrame -1 = idle (plain player.svg)
 // A live meal vanishing into the dragon's jaws: draws the actual animal
 // kind it just snatched (bunny, duck, eagle...) right at the mouth
 // (mx, my), facing fwdAngle. It struggles hard at first, then slides down
@@ -10910,6 +10950,14 @@ function drawPlayer(sx, sy, t) {
     }
   }
   if (typeof playerImgOk !== 'undefined' && playerImgOk) {
+    // Hit animation frame when swinging (falls back to player.svg per frame).
+    // Every frame shares one scale and one body anchor, so the body stays
+    // planted while the hit frames move around it.
+    var useImg = playerImg, fIdx = 0;
+    if (swingFrame >= 0 && swingFrame < SWING_SEQ.length) {
+      var sfi = SWING_SEQ[swingFrame];
+      if (playerFrameOk[sfi]) { useImg = playerFrameImgs[sfi]; fIdx = sfi; }
+    }
     ctx.save();
     ctx.translate(sx, sy + bob * 0.4);
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -10917,8 +10965,9 @@ function drawPlayer(sx, sy, t) {
     var heading = Math.atan2(ldy, ldx);
     ctx.rotate(heading - Math.PI / 2);
     var S = (player.r * 2 + 8) * 1.5;
-    var dw = S, dh = S * playerImg.height / playerImg.width;
-    ctx.drawImage(playerImg, -dw / 2, -dh / 2, dw, dh);
+    var fscale = S / playerFrameSize[0][0];
+    var dw = fscale * playerFrameSize[fIdx][0], dh = fscale * playerFrameSize[fIdx][1];
+    ctx.drawImage(useImg, -fscale * FRAME_ANCH_X, -fscale * FRAME_ANCH_Y, dw, dh);
     ctx.restore();
     ctx.globalAlpha = 1;
     return;
