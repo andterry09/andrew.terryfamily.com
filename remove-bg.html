@@ -182,18 +182,31 @@
     }
     render();
 
-    statusEl.textContent = "Working… first time loads the AI (about 40MB), please wait.";
+    statusEl.textContent = "Starting…";
     goBtn.disabled = true;
+    let lastProgress = Date.now();
+    const stallTimer = setInterval(() => {
+      const quiet = Math.round((Date.now() - lastProgress) / 1000);
+      if (quiet > 30) statusEl.textContent = "Still working… no movement for " + quiet + "s. Slow internet? Try a smaller photo or Chrome. Keep this tab open.";
+    }, 10000);
     try {
-      const outBlob = await removeBackground(fileBlob);
+      const outBlob = await removeBackground(fileBlob, {
+        progress: (key, current, total) => {
+          lastProgress = Date.now();
+          const pct = total ? Math.round((current / total) * 100) : current;
+          statusEl.textContent = "Loading AI " + pct + "% — first time only, keep this tab open.";
+        }
+      });
+      clearInterval(stallTimer);
       const url = URL.createObjectURL(outBlob);
       document.getElementById("after").src = url;
       const dl = document.getElementById("dl");
       dl.href = url; dl.style.display = "inline-block";
       statusEl.textContent = "Done! Download below.";
     } catch (err) {
+      clearInterval(stallTimer);
       console.error(err);
-      statusEl.textContent = "Error. Try a smaller JPG/PNG photo.";
+      statusEl.textContent = "Error. Try a smaller JPG/PNG photo, or try Chrome.";
       if (!UNLIMITED_TEST && freeLeft() < FREE_EACH_MONTH && paidLeft() >= 0) {
         if (getNum("bg_free_used") > 0 && freeLeft() < FREE_EACH_MONTH) {
           localStorage.setItem("bg_paid", String(paidLeft() + 1));
