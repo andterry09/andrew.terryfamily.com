@@ -342,6 +342,268 @@ var mud = new Uint8Array(W * H); // 1 on muddy dried-pond flats (slow, no fish/d
 function idx(x, y) { return y * W + x; }
 function inBounds(x, y) { return x >= 0 && y >= 0 && x < W && y < H; }
 
+// ---------- Infinite chunks (tiles outside the 240x240 spawn region) ----------
+// The classic hand-built region stays exactly as generated. Everything past
+// its border is endless deterministic terrain: same map forever (fixed
+// seed), generated 16x16 chunks on demand. A forced ocean moat rings the
+// spawn region so the join never cliffs.
+// Biome rarity (tunable): forest/plains/ocean/ponds common; desert,
+// savanna, snow and swamp uncommon; rock flats rare; volcanoes very rare.
+var CHUNK = 16, MOAT = 10;
+var OUT_DEEP = 0.07; // ocean where elev < WATER_LEVEL - this
+var R_DESERT = 0.66, R_SAV = 0.67, R_SNOW = 0.65, R_SWAMP = 0.69, R_ROCK = 0.76;
+var VCELL = 160, VOLC_P = 0.3; // volcano cell size + per-cell chance
+var chunks = new Map(); // "cx,cy" -> {biome,elev,snow,ice,mud,sav,des,swp,volc,lava,rock}
+function inRegion(tx, ty) { return tx >= 0 && ty >= 0 && tx < W && ty < H; }
+function moatOcean(tx, ty) {
+  if (inRegion(tx, ty)) return false;
+  return tx >= -MOAT && ty >= -MOAT && tx < W + MOAT && ty < H + MOAT;
+}
+function outCont(tx, ty) {
+  return fbm(tx * 0.006 + 11.7, ty * 0.006 + 11.7, 4) + 0.12 * fbm(tx * 0.03 + 77.1, ty * 0.03 + 77.1, 2);
+}
+function desertM(tx, ty) { return fbm(tx * 0.008 + 300.3, ty * 0.008 + 300.3, 3) > R_DESERT; }
+function savM(tx, ty) { return fbm(tx * 0.005 + 800.8, ty * 0.005 + 800.8, 3) > R_SAV; }
+function snowM(tx, ty) { return fbm(tx * 0.004 + 500.5, ty * 0.004 + 500.5, 3) > R_SNOW; }
+function swampM(tx, ty) { return fbm(tx * 0.009 + 900.9, ty * 0.009 + 900.9, 3) > R_SWAMP; }
+function rockM(tx, ty) { return fbm(tx * 0.007 + 700.7, ty * 0.007 + 700.7, 3) > R_ROCK; }
+// Active volcano center for a 160px cell, or null (very rare, deterministic)
+function volcanoCell(vx, vy) {
+  if (hash2(vx, vy, seed + 910) >= VOLC_P) return null;
+  return {
+    x: vx * VCELL + 20 + hash2(vx, vy, seed + 911) * (VCELL - 40),
+    y: vy * VCELL + 20 + hash2(vx, vy, seed + 912) * (VCELL - 40)
+  };
+}
+// Volcano cone covering a tile, or null (checks the 3x3 cells that can reach it)
+function volcanoAtOut(tx, ty) {
+  var bx = Math.floor(tx / VCELL), by = Math.floor(ty / VCELL), best = null;
+  for (var oy = -1; oy <= 1; oy++) {
+    for (var ox = -1; ox <= 1; ox++) {
+      var vc = volcanoCell(bx + ox, by + oy);
+      if (!vc) continue;
+      var dx = (tx - vc.x) / 20, dy = (ty - vc.y) / 18;
+      if (dx * dx + dy * dy < 1) { best = vc; }
+    }
+  }
+  return best;
+}
+// Base biome+elev for any outer tile (no beach ring, no lava rivers yet)
+function baseBiome(tx, ty) {
+  if (inRegion(tx, ty)) { var ri = ty * W + tx; return { b: biome[ri], e: elev[ri] }; }
+  if (moatOcean(tx, ty)) return { b: OCEAN, e: WATER_LEVEL - 0.08 };
+  var e = outCont(tx, ty) - 0.18;
+  if (e < WATER_LEVEL - OUT_DEEP) return { b: OCEAN, e: e };
+  if (e < WATER_LEVEL) return { b: WATER, e: e };
+  var vc = volcanoAtOut(tx, ty);
+  if (vc) return { b: GRASS, e: e, volc: 1, vcx: vc.x, vcy: vc.y };
+  if (rockM(tx, ty)) return { b: GRASS, e: e, rock: 1 };
+  var sn = snowM(tx, ty);
+  if (desertM(tx, ty) && !sn) return { b: SAND, e: e, des: 1 };
+  if (!sn && swampM(tx, ty)) {
+    var swd = fbm(tx * 0.05 + 450.4, ty * 0.05 + 450.4, 3) * 0.75 + hash2(tx, ty, seed + 851) * 0.25;
+    if (swd > 0.52) return { b: WATER, e: WATER_LEVEL - 0.06, swp: 1 };
+    return { b: GRASS, e: e, swp: 1 };
+  }
+  if (sn) return { b: GRASS, e: e, snow: 1 };
+  if (savM(tx, ty)) return { b: GRASS, e: e, sav: 1 };
+  return { b: GRASS, e: e };
+}
+function getChunk(cx, cy) {
+  var key = cx + ',' + cy;
+  var c = chunks.get(key);
+  if (!c) {
+    c = genChunk(cx, cy);
+    chunks.set(key, c);
+    if (chunks.size > 320 && typeof player !== 'undefined' && player.x !== undefined) {
+      var pcx = Math.floor(player.x / TILE / CHUNK), pcy = Math.floor(player.y / TILE / CHUNK);
+      chunks.forEach(function (v, k) {
+        var dx = v.cx - pcx, dy = v.cy - pcy;
+        if (dx * dx + dy * dy > 196 && chunks.size > 200) chunks.delete(k);
+      });
+    }
+  }
+  return c;
+}
+// Every volcano whose lava can reach this chunk (cone + river range)
+function volcanoesForChunk(cx, cy) {
+  var out = [];
+  var x0 = cx * CHUNK - 64, x1 = cx * CHUNK + CHUNK + 64;
+  var y0 = cy * CHUNK - 64, y1 = cy * CHUNK + CHUNK + 64;
+  var vx0 = Math.floor(x0 / VCELL) - 1, vx1 = Math.floor(x1 / VCELL) + 1;
+  var vy0 = Math.floor(y0 / VCELL) - 1, vy1 = Math.floor(y1 / VCELL) + 1;
+  for (var vy = vy0; vy <= vy1; vy++) {
+    for (var vx = vx0; vx <= vx1; vx++) {
+      var vc = volcanoCell(vx, vy);
+      if (vc && vc.x > x0 - 64 && vc.x < x1 + 64 && vc.y > y0 - 64 && vc.y < y1 + 64) out.push(vc);
+    }
+  }
+  return out;
+}
+function genChunk(cx, cy) {
+  var N = CHUNK + 2; // 1-tile scratch halo for rings
+  var sc_b = new Uint8Array(N * N), sc_lava = new Uint8Array(N * N);
+  var sc_e = new Float32Array(N * N);
+  var sc_volc = new Uint8Array(N * N), sc_des = new Uint8Array(N * N);
+  var sc_snow = new Uint8Array(N * N), sc_sav = new Uint8Array(N * N);
+  var sc_swp = new Uint8Array(N * N), sc_rock = new Uint8Array(N * N);
+  function sgi(ix, iy) { return iy * N + ix; }
+  var ix, iy;
+  for (iy = -1; iy <= CHUNK; iy++) {
+    for (ix = -1; ix <= CHUNK; ix++) {
+      var tx = cx * CHUNK + ix, ty = cy * CHUNK + iy;
+      var bb = baseBiome(tx, ty), si = sgi(ix + 1, iy + 1);
+      sc_b[si] = bb.b; sc_e[si] = bb.e;
+      if (bb.volc) sc_volc[si] = 1;
+      if (bb.des) sc_des[si] = 1;
+      if (bb.snow) sc_snow[si] = 1;
+      if (bb.sav) sc_sav[si] = 1;
+      if (bb.swp) sc_swp[si] = 1;
+      if (bb.rock) sc_rock[si] = 1;
+      // crater pool + rim vents (same shapes as the region volcano)
+      if (bb.volc && bb.b === GRASS) {
+        var cdx = (tx - bb.vcx) / 5.5, cdy = (ty - bb.vcy) / 5;
+        if (cdx * cdx + cdy * cdy < 1) { sc_b[si] = WATER; sc_lava[si] = 1; }
+        else if (hash2(tx, ty, seed + 882) < 0.12) { sc_b[si] = WATER; sc_lava[si] = 1; }
+      }
+    }
+  }
+  function inScratch(tx, ty) {
+    var lx = tx - cx * CHUNK + 1, ly = ty - cy * CHUNK + 1;
+    return lx >= 0 && ly >= 0 && lx < N && ly < N;
+  }
+  function stampLava(tx, ty) {
+    if (!inScratch(tx, ty)) return;
+    var si = sgi(tx - cx * CHUNK + 1, ty - cy * CHUNK + 1);
+    if (sc_b[si] !== GRASS && sc_b[si] !== SAND) return;
+    sc_b[si] = WATER; sc_lava[si] = 1; sc_volc[si] = 1;
+    sc_des[si] = 0; sc_snow[si] = 0; sc_sav[si] = 0; sc_swp[si] = 0; sc_rock[si] = 0;
+  }
+  function isLavaAt(tx, ty) {
+    if (!inScratch(tx, ty)) return false; // outside the scratch halo: treat as land
+    return sc_lava[sgi(tx - cx * CHUNK + 1, ty - cy * CHUNK + 1)] === 1;
+  }
+  // lava rivers from nearby volcanoes (deterministic walks, like the region's)
+  var vcs = volcanoesForChunk(cx, cy);
+  for (var vi = 0; vi < vcs.length; vi++) {
+    var vcx = vcs[vi].x, vcy = vcs[vi].y;
+    var vrng = mulberry32(((vcx * 73856093) ^ (vcy * 19349663) ^ seed) >>> 0);
+    for (var vri = 0; vri < 6; vri++) {
+      var vang = (vri / 6) * Math.PI * 2 + (vrng() - 0.5) * 0.8;
+      var vrx = vcx + Math.cos(vang) * 6, vry = vcy + Math.sin(vang) * 6;
+      var vrlen = 22 + ((vrng() * 16) | 0);
+      for (var vrs = 0; vrs < vrlen; vrs++) {
+        vang += (vrng() - 0.5) * 0.9;
+        vrx += Math.cos(vang); vry += Math.sin(vang);
+        var vx2 = Math.round(vrx), vy2 = Math.round(vry);
+        var lb = baseBiome(vx2, vy2);
+        if (lb.b === OCEAN || (lb.b === WATER && !isLavaAt(vx2, vy2))) break;
+        if (lb.b === GRASS || lb.b === SAND) {
+          // same water buffer as lavaGuardOut, using scratch lava state
+          var ok = true;
+          for (var wy = -1; wy <= 1 && ok; wy++) {
+            for (var wx = -1; wx <= 1; wx++) {
+              if (!wx && !wy) continue;
+              var wb2 = baseBiome(vx2 + wx, vy2 + wy);
+              if (wb2.b === OCEAN || (wb2.b === WATER && !isLavaAt(vx2 + wx, vy2 + wy))) { ok = false; break; }
+            }
+          }
+          if (!ok) break;
+          stampLava(vx2, vy2);
+        }
+        if (vrng() < 0.5) {
+          var vwx = vx2 + Math.round(-Math.sin(vang)), vwy = vy2 + Math.round(Math.cos(vang));
+          var wb3 = baseBiome(vwx, vwy);
+          if ((wb3.b === GRASS || wb3.b === SAND) && wb3.b !== OCEAN) {
+            var ok2 = true;
+            for (var wy2 = -1; wy2 <= 1 && ok2; wy2++) {
+              for (var wx2 = -1; wx2 <= 1; wx2++) {
+                if (!wx2 && !wy2) continue;
+                var wb4 = baseBiome(vwx + wx2, vwy + wy2);
+                if (wb4.b === OCEAN || (wb4.b === WATER && !isLavaAt(vwx + wx2, vwy + wy2))) { ok2 = false; break; }
+              }
+            }
+            if (ok2) stampLava(vwx, vwy);
+          }
+        }
+      }
+    }
+  }
+  // finalize inner tiles: beach ring, baked stone shores, ice, mud
+  var c = {
+    cx: cx, cy: cy,
+    biome: new Uint8Array(CHUNK * CHUNK), elev: new Float32Array(CHUNK * CHUNK),
+    snow: new Uint8Array(CHUNK * CHUNK), ice: new Uint8Array(CHUNK * CHUNK),
+    mud: new Uint8Array(CHUNK * CHUNK), sav: new Uint8Array(CHUNK * CHUNK),
+    des: new Uint8Array(CHUNK * CHUNK), swp: new Uint8Array(CHUNK * CHUNK),
+    volc: new Uint8Array(CHUNK * CHUNK), lava: new Uint8Array(CHUNK * CHUNK),
+    rock: new Uint8Array(CHUNK * CHUNK)
+  };
+  for (iy = 0; iy < CHUNK; iy++) {
+    for (ix = 0; ix < CHUNK; ix++) {
+      var si2 = sgi(ix + 1, iy + 1), ci2 = iy * CHUNK + ix;
+      var b2 = sc_b[si2];
+      if (!sc_lava[si2] && b2 === GRASS && !sc_volc[si2] && !sc_des[si2] && !sc_snow[si2] && !sc_rock[si2] && !sc_swp[si2]) {
+        var shore = false; // beach sand hugs the ocean
+        for (var sy3 = -2; sy3 <= 2 && !shore; sy3++) {
+          for (var sx3 = -2; sx3 <= 2; sx3++) {
+            if (!sx3 && !sy3) continue;
+            if (sc_b[sgi(ix + 1 + sx3, iy + 1 + sy3)] === OCEAN) { shore = true; break; }
+          }
+        }
+        if (shore) b2 = SAND;
+      }
+      if (!sc_lava[si2] && (b2 === GRASS || b2 === SAND) && !sc_volc[si2]) {
+        var hot = false; // bare stone bakes beside lava flows
+        for (var ly2 = -1; ly2 <= 1 && !hot; ly2++) {
+          for (var lx2 = -1; lx2 <= 1; lx2++) {
+            if (!lx2 && !ly2) continue;
+            if (sc_lava[sgi(ix + 1 + lx2, iy + 1 + ly2)]) { hot = true; break; }
+          }
+        }
+        if (hot) sc_volc[si2] = 1;
+      }
+      c.biome[ci2] = b2; c.elev[ci2] = sc_e[si2];
+      c.snow[ci2] = sc_snow[si2]; c.sav[ci2] = sc_sav[si2]; c.des[ci2] = sc_des[si2];
+      c.swp[ci2] = sc_swp[si2]; c.volc[ci2] = sc_volc[si2]; c.lava[ci2] = sc_lava[si2];
+      c.rock[ci2] = sc_rock[si2];
+      c.ice[ci2] = 0; c.mud[ci2] = 0;
+      if (b2 === WATER && !sc_lava[si2]) {
+        if (sc_sav[si2] && !sc_swp[si2]) c.mud[ci2] = 1; // savanna ponds dry out
+        else {
+          var froze = false; // ponds freeze when snow is close
+          for (var iy3 = -2; iy3 <= 2 && !froze; iy3++) {
+            for (var ix3 = -2; ix3 <= 2; ix3++) {
+              if (!ix3 && !iy3) continue;
+              if (sc_snow[sgi(ix + 1 + ix3, iy + 1 + iy3)]) { froze = true; break; }
+            }
+          }
+          if (froze) c.ice[ci2] = 1;
+        }
+      }
+    }
+  }
+  return c;
+}
+// Tile accessors: spawn region reads its arrays, everywhere else streams chunks
+function tChunk(tx, ty) {
+  tx = Math.floor(tx); ty = Math.floor(ty);
+  if (inRegion(tx, ty)) return null;
+  var c = getChunk(tx >> 4, ty >> 4);
+  return { c: c, i: ((ty & 15) << 4) + (tx & 15) };
+}
+function tBiome(tx, ty) { if (inRegion(tx, ty)) return biome[ty * W + tx]; var q = tChunk(tx, ty); return q.c.biome[q.i]; }
+function tElev(tx, ty) { if (inRegion(tx, ty)) return elev[ty * W + tx]; var q = tChunk(tx, ty); return q.c.elev[q.i]; }
+function tSnow(tx, ty) { if (inRegion(tx, ty)) return snow[ty * W + tx]; var q = tChunk(tx, ty); return q.c.snow[q.i]; }
+function tIce(tx, ty) { if (inRegion(tx, ty)) return ice[ty * W + tx]; var q = tChunk(tx, ty); return q.c.ice[q.i]; }
+function tMud(tx, ty) { if (inRegion(tx, ty)) return mud[ty * W + tx]; var q = tChunk(tx, ty); return q.c.mud[q.i]; }
+function tSav(tx, ty) { if (inRegion(tx, ty)) return sav[ty * W + tx]; var q = tChunk(tx, ty); return q.c.sav[q.i]; }
+function tDes(tx, ty) { if (inRegion(tx, ty)) return des[ty * W + tx]; var q = tChunk(tx, ty); return q.c.des[q.i]; }
+function tSwp(tx, ty) { if (inRegion(tx, ty)) return swp[ty * W + tx]; var q = tChunk(tx, ty); return q.c.swp[q.i]; }
+function tVolc(tx, ty) { if (inRegion(tx, ty)) return volc[ty * W + tx]; var q = tChunk(tx, ty); return q.c.volc[q.i]; }
+function tLava(tx, ty) { if (inRegion(tx, ty)) return lava[ty * W + tx]; var q = tChunk(tx, ty); return q.c.lava[q.i]; }
+function tRock(tx, ty) { if (inRegion(tx, ty)) return rock[ty * W + tx]; var q = tChunk(tx, ty); return q.c.rock[q.i]; }
+
 function generate(s) {
   seed = s;
   var rand = mulberry32(seed);
@@ -2743,56 +3005,52 @@ function generate(s) {
     }
   })();
 
-  buildMinimap();
+  refreshMinimap();
   return spawn;
 }
 
-// ---------- Minimap ----------
+// ---------- Minimap (local area around the player, refreshed live) ----------
+var MM_R = 60; // tiles each way
 var mapCanvas = document.createElement('canvas');
-mapCanvas.width = W; mapCanvas.height = H;
-function buildMinimap() {
-  var ctx = mapCanvas.getContext('2d');
-  var img = ctx.createImageData(W, H);
-  for (var y = 0; y < H; y++) {
-    for (var x = 0; x < W; x++) {
-      var i = idx(x, y), o = i * 4;
-      var r = 60, g = 179, b = 113;
-      if (biome[i] === OCEAN) { r = 20; g = 60; b = 140; }
-      else if (lava[i]) { r = 230; g = 90; b = 20; }
-      else if (mud[i]) { r = 168; g = 132; b = 92; }
-      else if (biome[i] === WATER) {
-        if (swp[i]) { r = 58; g = 112; b = 78; }
-        else if (bigLake[i]) { r = 32; g = 110; b = 185; }
-        else if (ice[i]) { r = 207; g = 227; b = 242; }
-        else { r = 52; g = 152; b = 219; }
-      }
-      else if (palms[i]) { r = 34; g = 139; b = 70; }
-      else if (cactus[i]) { r = 46; g = 110; b = 70; }
-      else if (boulder[i]) { r = 110; g = 106; b = 98; }
-      else if (deadTree[i]) { r = 150; g = 140; b = 125; }
-      else if (biome[i] === SAND) {
-        if (volc[i]) { r = 70; g = 62; b = 56; }
-        else if (des[i]) { r = 235; g = 200; b = 118; }
-        else { r = 244; g = 226; b = 133; }
-      }
-      else if (acacias[i]) { r = 110; g = 118; b = 58; }
-      else if (pines[i]) { r = 27; g = 94; b = 78; }
-      else if (trees[i]) { r = 20; g = 90; b = 40; }
-      else if (stumps[i]) {
-        if (stumpKind[i] === 2) { r = 105; g = 100; b = 85; }
-        else if (stumpKind[i] === 3) { r = 155; g = 130; b = 88; }
-        else { r = 122; g = 90; b = 60; }
-      }
-      else if (deadB[i]) { r = 150; g = 128; b = 92; }
-      else if (volc[i]) { r = 70; g = 62; b = 56; }
-      else if (swp[i]) { r = 56; g = 132; b = 86; }
-      else if (rock[i]) { r = 168; g = 162; b = 150; }
-      else if (sav[i]) { r = 205; g = 185; b = 120; }
-      else if (snow[i]) { r = 232; g = 240; b = 248; }
-      img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+mapCanvas.width = MM_R * 2 + 1; mapCanvas.height = MM_R * 2 + 1;
+var mapRefreshT = 99;
+function minimapRGB(tx, ty) {
+  var b, mLv, mMd, mSw, mRk, mVl, mDs, mSn, mSv, mBg;
+  if (inRegion(tx, ty)) {
+    var i = ty * W + tx;
+    b = biome[i]; mLv = lava[i]; mMd = mud[i]; mSw = swp[i]; mRk = rock[i];
+    mVl = volc[i]; mDs = des[i]; mSn = snow[i]; mSv = sav[i]; mBg = bigLake[i];
+  } else {
+    var q = tChunk(tx, ty);
+    b = q.c.biome[q.i]; mLv = q.c.lava[q.i]; mMd = q.c.mud[q.i]; mSw = q.c.swp[q.i];
+    mRk = q.c.rock[q.i]; mVl = q.c.volc[q.i]; mDs = q.c.des[q.i];
+    mSn = q.c.snow[q.i]; mSv = q.c.sav[q.i]; mBg = 0;
+  }
+  var r = 60, g = 179, bl = 113;
+  if (b === OCEAN) { r = 20; g = 60; bl = 140; }
+  else if (mLv) { r = 230; g = 90; bl = 20; }
+  else if (mMd) { r = 168; g = 132; bl = 92; }
+  else if (b === WATER) {
+    if (mSw) { r = 58; g = 112; bl = 78; }
+    else if (mBg) { r = 32; g = 110; bl = 185; }
+    else if (tIce(tx, ty)) { r = 207; g = 227; bl = 242; }
+    else { r = 52; g = 152; bl = 219; }
+  }
+  return [r, g, bl];
+}
+function refreshMinimap() {
+  var mctx = mapCanvas.getContext('2d');
+  var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+  var S = MM_R * 2 + 1;
+  var img = mctx.createImageData(S, S);
+  for (var oy = -MM_R; oy <= MM_R; oy++) {
+    for (var ox = -MM_R; ox <= MM_R; ox++) {
+      var rgb = minimapRGB(ptx + ox, pty + oy);
+      var o = ((oy + MM_R) * S + (ox + MM_R)) * 4;
+      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
     }
   }
-  ctx.putImageData(img, 0, 0);
+  mctx.putImageData(img, 0, 0);
 }
 
 // ---------- Canvas / input ----------
@@ -3025,27 +3283,23 @@ function crabDart(ch) {
 }
 function isInWater(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-  if (!inBounds(tx, ty)) return true;
-  var b = biome[idx(tx, ty)];
+  var b = tBiome(tx, ty);
   if (b === OCEAN) return true;
-  return b === WATER && !mud[idx(tx, ty)]; // mud flats are not water
+  return b === WATER && !tMud(tx, ty); // mud flats are not water
 }
 function isMud(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-  if (!inBounds(tx, ty)) return false;
-  return mud[idx(tx, ty)] === 1;
+  return tMud(tx, ty) === 1;
 }
 function isLava(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-  if (!inBounds(tx, ty)) return false;
-  return lava[idx(tx, ty)] === 1;
+  return tLava(tx, ty) === 1;
 }
 // Animals wade slowly through mud: half speed while standing in it
 function mudFactor(px, py) { return isMud(px, py) ? 0.5 : 1; }
 function isIce(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-  if (!inBounds(tx, ty)) return false;
-  return ice[idx(tx, ty)] === 1;
+  return tIce(tx, ty) === 1;
 }
 // Walk one duck step toward (tx, ty) without entering trunk cores.
 // Returns true once close enough. Heading always faces travel.
@@ -4297,7 +4551,8 @@ function eagleRemovePrey(eg) {
   if (pr) {
     var arr = eg.preyKind === 'fish' ? fishes : eg.preyKind === 'bunny' ? bunnies : eg.preyKind === 'hedge' ? hedgehogs : eg.preyKind === 'snake' ? snakes : eg.preyKind === 'tar' ? tarantulas : eg.preyKind === 'lizard' ? lizards : eg.preyKind === 'jack' ? jacks : eg.preyKind === 'frog' ? frogs : eg.preyKind === 'dillo' ? armadillos : eg.preyKind === 'gull' ? seagulls : ducks;
     var pi = arr.indexOf(pr);
-    if (pi !== -1) arr.splice(pi, 1);
+    if (pi === -1) { eg.prey = null; eg.preyKind = null; return; } // already gone: no phantom replacement
+    arr.splice(pi, 1);
     if (eg.preyKind === 'fish') {
       if (eg.preySea) spawnSeaFish(cx, cy); else spawnPondFish(cx, cy);
     } else if (eg.preyKind === 'bunny') {
@@ -4635,14 +4890,12 @@ function pickMaterial(dk) {
 }
 function hitsSolid(px, py) {
   var r = player.r - 3;
-  if (px - r < 0 || py - r < 0 || px + r > WORLD_PX || py + r > WORLD_PY) return true;
   var x0 = Math.floor((px - r) / TILE), x1 = Math.floor((px + r) / TILE);
   var y0 = Math.floor((py - r) / TILE), y1 = Math.floor((py + r) / TILE);
-  for (var ty = y0; ty <= y1; ty++) {
-    for (var tx = x0; tx <= x1; tx++) {
-      if (!inBounds(tx, ty)) continue;
-      var ti = idx(tx, ty);
-      if (lava[ti]) {
+    for (var ty = y0; ty <= y1; ty++) {
+      for (var tx = x0; tx <= x1; tx++) {
+        var ti = idx(tx, ty); // region arrays read OOB-safe outside (undefined = walkable)
+        if (tLava(tx, ty)) {
         // molten lava is impassable: circle vs tile rect, like a boulder
         var lx = Math.max(tx * TILE, Math.min(px, tx * TILE + TILE));
         var ly = Math.max(ty * TILE, Math.min(py, ty * TILE + TILE));
@@ -4843,8 +5096,7 @@ function resolveSolids() {
     player.x += bx * 1.01; // tiny overshoot so we never rest exactly on the edge
     player.y += by * 1.01;
   }
-  player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
-  player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+  // no world edge anymore: walk as far as you like
 }
 
 // Habitat audit helpers: tile under an animal (-1 if off-map), and hop an
@@ -4959,8 +5211,7 @@ function update(dt) {
     resolveAnimals();
     resolveTrunks();
   }
-  player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
-  player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
+  // no world edge anymore: walk as far as you like
   resolveSolids();
 
   // Splashes: little ripples while you actually move through water
@@ -5044,8 +5295,8 @@ function update(dt) {
   }
 
   var viewW = vw / ZOOM, viewH = vh / ZOOM;
-  cam.x = Math.max(0, Math.min(WORLD_PX - viewW, player.x - viewW / 2));
-  cam.y = Math.max(0, Math.min(WORLD_PY - viewH, player.y - viewH / 2));
+  cam.x = player.x - viewW / 2;
+  cam.y = player.y - viewH / 2;
 
   // Hiding: all the way under a canopy (hugging the trunk) conceals you
   var hiding = false;
@@ -6342,11 +6593,14 @@ function update(dt) {
         gpb.heading = ga.heading + (2.5 - ga.biteT) * 6 + (Math.random() - 0.5) * 2 * ghost;
         if (ga.biteT <= 0) { // limp now: swallow it whole
           var gpfi = ducks.indexOf(gpb);
-          if (gpfi !== -1) ducks.splice(gpfi, 1);
-          if (gpb.swampDuck) spawnSwampDuck(); // eaten swamp duck reappears in the swamp
+          if (gpfi === -1) { ga.prey = null; ga.state = 'cruise'; ga.resting = true; ga.timer = 0.8; }
+          else {
+            ducks.splice(gpfi, 1);
+            if (gpb.swampDuck) spawnSwampDuck(); // eaten swamp duck reappears in the swamp
+            ga.gulpT = 2.0;
+            ga.state = 'gulp';
+          }
           ga.prey = null;
-          ga.gulpT = 2.0;
-          ga.state = 'gulp';
         }
       }
     } else if (ga.state === 'gulp') { // swallowing: slow bulge working down
@@ -6814,14 +7068,17 @@ function update(dt) {
         if (sb.biteT <= 0) {
           // dead and swallowed: a new snake instantly appears in the desert
           var spi = snakes.indexOf(sgp);
-          if (spi !== -1) snakes.splice(spi, 1);
-          if (desSpots.length) {
-            var sns = desSpots[(Math.random() * desSpots.length) | 0];
-            spawnSnake((sns % W + 0.5) * TILE, (((sns / W) | 0) + 0.5) * TILE);
+          if (spi === -1) { sb.prey = null; sb.state = 'walk'; sb.timer = 1; }
+          else {
+            snakes.splice(spi, 1);
+            if (desSpots.length) {
+              var sns = desSpots[(Math.random() * desSpots.length) | 0];
+              spawnSnake((sns % W + 0.5) * TILE, (((sns / W) | 0) + 0.5) * TILE);
+            }
+            sb.prey = null;
+            sb.gulpT = 2.5;
+            sb.state = 'gulp';
           }
-          sb.prey = null;
-          sb.gulpT = 2.5;
-          sb.state = 'gulp';
         }
       }
     } else { // 'gulp': swallowing, throat bulging
@@ -8247,16 +8504,19 @@ function update(dt) {
             if (dg.preyKind === 'eagle') eagleReleasePrey(dpr);
             var darr = dg.preyKind === 'bunny' ? bunnies : dg.preyKind === 'hedge' ? hedgehogs : dg.preyKind === 'warthog' ? warthogs : dg.preyKind === 'jack' ? jacks : dg.preyKind === 'snake' ? snakes : dg.preyKind === 'duck' ? ducks : dg.preyKind === 'frog' ? frogs : dg.preyKind === 'lizard' ? lizards : dg.preyKind === 'dillo' ? armadillos : dg.preyKind === 'tar' ? tarantulas : dg.preyKind === 'vulture' ? vultures : dg.preyKind === 'owl' ? snowyOwls : dg.preyKind === 'eagle' ? eagles : dg.preyKind === 'hawk' ? hawks : dg.preyKind === 'gull' ? seagulls : ants;
             var dpi = darr.indexOf(dpr);
-            if (dpi !== -1) darr.splice(dpi, 1);
-            dg.meal = dg.preyKind;
-            dg.mealSnow = !!dpr.snow;
-            dg.mealSc = dpr.sc || 1; // remember the catch's look for the jaw meal
-            dg.mealDrake = !!dpr.drake;
-            dg.mealKind = dpr.kind || 0;
-            dragonRespawnPrey(dg.meal, dg.mealSnow); // replacement appears at once: the count never dips
+            if (dpi === -1) { dg.prey = null; dg.preyKind = null; } // already gone: no gulp, no phantom
+            else {
+              darr.splice(dpi, 1);
+              dg.meal = dg.preyKind;
+              dg.mealSnow = !!dpr.snow;
+              dg.mealSc = dpr.sc || 1; // remember the catch's look for the jaw meal
+              dg.mealDrake = !!dpr.drake;
+              dg.mealKind = dpr.kind || 0;
+              dragonRespawnPrey(dg.meal, dg.mealSnow); // replacement appears at once: the count never dips
+              dg.gulpT = 2.5;
+              dg.state = 'gulp';
+            }
             dg.prey = null; dg.preyKind = null;
-            dg.gulpT = 2.5;
-            dg.state = 'gulp';
           } else {
             var dstep = 130 * dt; // fast stoop: birds can't outrun it either
             var dnx = dg.x + Math.cos(dg.heading) * dstep;
@@ -8444,6 +8704,8 @@ function resolveAnimalPairs() {
   }
   animalCountT += dt;
   if (animalCountT >= 15) { animalCountT = 0; updateAnimalCounts(); }
+  mapRefreshT += dt;
+  if (mapRefreshT > 2) { mapRefreshT = 0; refreshMinimap(); }
 }
 
 // ---------- Drawing ----------
@@ -11434,16 +11696,16 @@ function render(t, rdt) {
   ctx.fillStyle = '#0b1020';
   ctx.fillRect(0, 0, vw, vh);
   var viewW = vw / ZOOM, viewH = vh / ZOOM;
-  var x0 = Math.max(0, Math.floor(cam.x / TILE));
-  var y0 = Math.max(0, Math.floor(cam.y / TILE));
-  var x1 = Math.min(W - 1, Math.ceil((cam.x + viewW) / TILE));
-  var y1 = Math.min(H - 1, Math.ceil((cam.y + viewH) / TILE));
+  var x0 = Math.floor(cam.x / TILE);
+  var y0 = Math.floor(cam.y / TILE);
+  var x1 = Math.ceil((cam.x + viewW) / TILE);
+  var y1 = Math.ceil((cam.y + viewH) / TILE);
   // Objects need a wider cull range than ground: tree canopies spill ~2
   // tiles past their trunk tile, so without a margin they pop in at the
   // screen edge instead of already being there.
   var M = 3;
-  var ox0 = Math.max(0, x0 - M), oy0 = Math.max(0, y0 - M);
-  var ox1 = Math.min(W - 1, x1 + M), oy1 = Math.min(H - 1, y1 + M);
+  var ox0 = x0 - M, oy0 = y0 - M;
+  var ox1 = x1 + M, oy1 = y1 + M;
   var x, y;
   ctx.setTransform(dpr * ZOOM, 0, 0, dpr * ZOOM, -cam.x * dpr * ZOOM, -cam.y * dpr * ZOOM);
 
@@ -11452,12 +11714,15 @@ function render(t, rdt) {
   for (y = oy0; y <= oy1; y++) {
     for (x = ox0; x <= ox1; x++) {
       var i = idx(x, y);
-      var b = biome[i];
+      var b = tBiome(x, y);
+      var gLava = tLava(x, y), gSwp = tSwp(x, y), gBig = inRegion(x, y) ? bigLake[i] : 0;
+      var gVolc = tVolc(x, y), gDes = tDes(x, y), gRock = tRock(x, y);
+      var gSnow = tSnow(x, y), gSav = tSav(x, y), gMud = tMud(x, y), gIce = tIce(x, y);
       var sx = x * TILE, sy = y * TILE;
       var v = hash2(x, y, 21) - 0.5;
       if (b === OCEAN) ctx.fillStyle = shade(C_OCEAN, v * 12);
-      else if (b === WATER) ctx.fillStyle = shade(lava[i] ? C_LAVA : (swp[i] ? C_SWPW : (bigLake[i] ? C_LAKE : C_WATER)), v * 12);
-      else if (b === SAND) ctx.fillStyle = shade(volc[i] ? C_BASALT : (des[i] ? C_DES : C_SAND), v * 14);
+      else if (b === WATER) ctx.fillStyle = shade(gLava ? C_LAVA : (gSwp ? C_SWPW : (gBig ? C_LAKE : C_WATER)), v * 12);
+      else if (b === SAND) ctx.fillStyle = shade(gVolc ? C_BASALT : (gDes ? C_DES : C_SAND), v * 14);
       else {
         // grass hugging a pond or lake reads a little darker (2-tile ring;
         // lava doesn't count — its shores stay bare stone)
@@ -11466,23 +11731,22 @@ function render(t, rdt) {
           for (var dgx = -2; dgx <= 2; dgx++) {
             if (!dgx && !dgy) continue;
             var dxx = x + dgx, dyy = y + dgy;
-            if (dxx < 0 || dyy < 0 || dxx >= W || dyy >= H) continue;
-            if (biome[idx(dxx, dyy)] === WATER) {
-              if (lava[idx(dxx, dyy)]) dgLava = true;
+            if (tBiome(dxx, dyy) === WATER) {
+              if (tLava(dxx, dyy)) dgLava = true;
               else {
                 dg = true;
-                if (mud[idx(dxx, dyy)]) dgMud = true;
+                if (tMud(dxx, dyy)) dgMud = true;
                 break;
               }
             }
           }
         }
-        ctx.fillStyle = rock[i] ? shade(C_ROCK, v * 12) : (volc[i] ? shade(C_BASALT, v * 10) : (swp[i] ? shade(C_SWPG, v * 14) : (snow[i] ? shade(C_SNOW, v * 10) : (sav[i] ? shade(dg ? C_SAV_DARK : C_SAV, v * 16) : shade(dg ? C_GRASS_DARK : C_GRASS, v * 16)))));
+        ctx.fillStyle = gRock ? shade(C_ROCK, v * 12) : (gVolc ? shade(C_BASALT, v * 10) : (gSwp ? shade(C_SWPG, v * 14) : (gSnow ? shade(C_SNOW, v * 10) : (gSav ? shade(dg ? C_SAV_DARK : C_SAV, v * 16) : shade(dg ? C_GRASS_DARK : C_GRASS, v * 16)))));
       }
       ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
 
       if (b === WATER || b === OCEAN) {
-        if (b === WATER && lava[i]) {
+        if (b === WATER && gLava) {
           // molten lava: glowing orange with drifting dark crust and bright seams
           ctx.fillStyle = shade(C_LAVA, v * 18);
           ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
@@ -11500,7 +11764,7 @@ function render(t, rdt) {
             ctx.quadraticCurveTo(lgx, lgy - 3, lgx + 8, lgy + 2);
             ctx.stroke();
           }
-        } else if (b === WATER && mud[i]) {
+        } else if (b === WATER && gMud) {
           // dried-pond mud flat: brown, cracked, with a few short dry reeds
           ctx.fillStyle = shade(C_MUD, v * 14);
           ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
@@ -11542,7 +11806,7 @@ function render(t, rdt) {
           ctx.quadraticCurveTo(sx + 24, wy + 3 - ph * 2, sx + 28, wy);
           ctx.stroke();
         }
-        if (b === WATER && !ice[i] && hash2(x, y, 221) < 0.06) {
+        if (b === WATER && !gIce && hash2(x, y, 221) < 0.06) {
           // lily pad with a notch, rarely flowering (never on ice)
           // lily pad with a notch, rarely flowering
           var lpx = sx + 9 + hash2(x, y, 222) * 14, lpy = sy + 9 + hash2(x, y, 223) * 14;
@@ -11561,7 +11825,7 @@ function render(t, rdt) {
             ctx.beginPath(); ctx.arc(lpx + 1, lpy - 1, 0.9, 0, 7); ctx.fill();
           }
         }
-        if (b === WATER && ice[i]) {
+        if (b === WATER && gIce) {
           // frozen over: the regular pond look, just whiter, plus faint cracks
           ctx.fillStyle = 'rgba(232,240,248,0.5)';
           ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
@@ -11578,7 +11842,7 @@ function render(t, rdt) {
         } // end non-mud water
       } else if (b === GRASS) {
         // lots of little pebbles scattered over the rock flat (and the volcano cone)
-        if ((rock[i] || volc[i]) && !boulder[i]) {
+        if ((gRock || gVolc) && !boulder[i]) {
           for (var pb = 0; pb < 5; pb++) {
             var pbx = sx + 3 + hash2(x + pb * 7, y + pb * 3, 843) * 26;
             var pby = sy + 3 + hash2(x + pb * 11, y + pb * 5, 844) * 26;
@@ -11589,7 +11853,7 @@ function render(t, rdt) {
             ctx.beginPath(); ctx.arc(pbx - pbr * 0.3, pby - pbr * 0.3, pbr * 0.4, 0, 7); ctx.fill();
           }
         }
-        if (snow[i]) {
+        if (gSnow) {
           // snowfield sparkle — no summer plants up here
           if (hash2(x, y, 631) < 0.3) {
             ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -11634,8 +11898,8 @@ function render(t, rdt) {
             ctx.beginPath(); ctx.ellipse(lgx + 4, lgy + 1, 7, 3, 0, 0, 7); ctx.fill();
           }
         } else {
-        if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i] && !acacias[i] && !deadB[i] && !volc[i] && !dgLava) {
-          ctx.strokeStyle = sav[i] ? 'rgba(150,125,70,0.8)' : 'rgba(20,90,40,0.7)';
+        if (hash2(x, y, 24) < 0.55 && !trees[i] && !bushes[i] && !acacias[i] && !deadB[i] && !gVolc && !dgLava) {
+          ctx.strokeStyle = gSav ? 'rgba(150,125,70,0.8)' : 'rgba(20,90,40,0.7)';
           ctx.lineWidth = 2;
           var gx = sx + 6 + hash2(x, y, 25) * 20;
           var gy = sy + 6 + hash2(x, y, 26) * 20;
@@ -11644,7 +11908,7 @@ function render(t, rdt) {
           ctx.moveTo(gx + 5, gy + 1); ctx.lineTo(gx + 7, gy - 5);
           ctx.stroke();
         }
-        if (sav[i] && hash2(x, y, 643) < 0.22 && !acacias[i] && !deadB[i]) {
+        if (gSav && hash2(x, y, 643) < 0.22 && !acacias[i] && !deadB[i]) {
           // dry tall grass: golden clumps with seed heads
           var tgx = sx + 8 + hash2(x, y, 644) * 16;
           var tgy = sy + 10 + hash2(x, y, 645) * 14;
@@ -11686,7 +11950,7 @@ function render(t, rdt) {
           ctx.ellipse(sx + 7 + hash2(x, y, 103) * 18, sy + 7 + hash2(x, y, 104) * 18, 4.5, 2.8, la, 0, 7);
           ctx.fill();
         }
-        if (open[i] && !sav[i] && !dg && !bushes[i] && !rock[i] && hash2(x, y, 161) < 0.09) {
+        if (open[i] && !gSav && !dg && !bushes[i] && !gRock && hash2(x, y, 161) < 0.09) {
           // tiny wildflowers (fields only)
           var fx = sx + 5 + hash2(x, y, 162) * 22, fy = sy + 5 + hash2(x, y, 163) * 22;
           var fc = hash2(x, y, 164);
@@ -11701,7 +11965,7 @@ function render(t, rdt) {
           ctx.fillStyle = '#ff9d00';
           ctx.beginPath(); ctx.arc(fx, fy - 1.2, 1.3, 0, 7); ctx.fill();
         }
-        if (open[i] && !sav[i] && !bushes[i] && !rock[i] && hash2(x, y, 171) < 0.07) {
+        if (open[i] && !gSav && !bushes[i] && !gRock && hash2(x, y, 171) < 0.07) {
           // feathery ferns (fields only)
           var qx = sx + 6 + hash2(x, y, 172) * 20, qy = sy + 10 + hash2(x, y, 173) * 16;
           var qs = 0.8 + hash2(x, y, 174) * 0.5;
@@ -11716,7 +11980,7 @@ function render(t, rdt) {
             ctx.stroke();
           }
         }
-        if (dg && !bushes[i] && !trees[i] && !volc[i] && hash2(x, y, 241) < 0.35) {
+        if (dg && !bushes[i] && !trees[i] && !gVolc && hash2(x, y, 241) < 0.35) {
           // bank ferns: lots of them, varied sizes and two shapes
           var nx = sx + 6 + hash2(x, y, 242) * 20, ny = sy + 12 + hash2(x, y, 243) * 14;
           var ns = 0.7 + hash2(x, y, 244) * 0.9; // 0.7x - 1.6x size
@@ -11734,7 +11998,7 @@ function render(t, rdt) {
             ctx.stroke();
           }
         }
-        if (dg && !bushes[i] && !trees[i] && !volc[i] && hash2(x, y, 211) < (dgMud ? 0.035 : 0.08)) {
+        if (dg && !bushes[i] && !trees[i] && !gVolc && hash2(x, y, 211) < (dgMud ? 0.035 : 0.08)) {
           // tall cattail clump (sparser around the savanna mud): every stalk rises from one base point
           var kx = sx + 10 + hash2(x, y, 212) * 12, ky = sy + 25 + hash2(x, y, 213) * 5;
           // a couple of blades fanning out at the base
@@ -12293,8 +12557,9 @@ function render(t, rdt) {
     ctx.beginPath(); ctx.arc(joy.bx + joy.dx * 55, joy.by + joy.dy * 55, 22, 0, 7); ctx.fill();
   }
 
-  // Minimap
+  // Minimap: local area around the player (you're the white dot in the middle)
   var mm = 150, mx = vw - mm - 12, my = 12;
+  var mmScale = mm / (MM_R * 2 + 1);
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(mx - 5, my - 5, mm + 10, mm + 10);
   ctx.drawImage(mapCanvas, mx, my, mm, mm);
@@ -12303,7 +12568,7 @@ function render(t, rdt) {
   ctx.strokeRect(mx - 5, my - 5, mm + 10, mm + 10);
   ctx.fillStyle = '#fff';
   ctx.beginPath();
-  ctx.arc(mx + (player.x / WORLD_PX) * mm, my + (player.y / WORLD_PY) * mm, 3.5, 0, 7);
+  ctx.arc(mx + mm / 2, my + mm / 2, 3.5, 0, 7);
   ctx.fill();
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 1;
@@ -12311,9 +12576,12 @@ function render(t, rdt) {
   // an orange dot tracking each eagle
   for (var egi3 = 0; egi3 < eagles.length; egi3++) {
     var eg3 = eagles[egi3];
+    var ex3 = mx + mm / 2 + (eg3.x - player.x) / TILE * mmScale;
+    var ey3 = my + mm / 2 + (eg3.y - player.y) / TILE * mmScale;
+    if (ex3 < mx || ey3 < my || ex3 > mx + mm || ey3 > my + mm) continue;
     ctx.fillStyle = '#ff9d00';
     ctx.beginPath();
-    ctx.arc(mx + (eg3.x / WORLD_PX) * mm, my + (eg3.y / WORLD_PY) * mm, 2.5, 0, 7);
+    ctx.arc(ex3, ey3, 2.5, 0, 7);
     ctx.fill();
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
