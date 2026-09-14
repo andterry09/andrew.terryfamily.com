@@ -65,6 +65,47 @@
     white-space: nowrap;
     pointer-events: none;
   }
+  #menu {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 14px;
+    background: rgba(5, 8, 16, 0.72);
+    color: #fff;
+    text-align: left;
+    padding: 20px 20px 20px 10vw;
+    max-height: 100vh;
+    overflow: auto;
+  }
+  #menu .title { font-size: 2rem; font-weight: bold; color: #ffd700; }
+  #menu .hint { font-size: 0.95rem; opacity: 0.9; line-height: 1.6; }
+  #playBtn {
+    font-size: 1.9rem;
+    font-weight: bold;
+    color: #0b1020;
+    background: #ffd700;
+    border: none;
+    border-radius: 14px;
+    padding: 20px 90px;
+    cursor: pointer;
+  }
+  #playBtn:hover { background: #ffdf40; }
+  #hatRow { display: flex; align-items: center; gap: 8px; }
+  #hatRow .hatlabel { font-size: 1.1rem; opacity: 0.9; }
+  .hatbtn {
+    font-size: 1.6rem;
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    border: 2px solid transparent;
+    background: rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+  }
+  .hatbtn.sel { border-color: #ffd700; background: rgba(255, 215, 0, 0.18); }
 </style>
 </head>
 <body>
@@ -79,6 +120,19 @@
 </div>
 <div id="hidden-badge">🤫 Hidden!</div>
 <div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
+<div id="menu">
+  <div class="title">🌍 Mope Survival</div>
+  <div class="hint">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Mouse to look &nbsp;•&nbsp; Click to hit<br>Touch: drag to walk</div>
+  <div id="hatRow">
+    <span class="hatlabel">Hat:</span>
+    <button class="hatbtn" data-hat="0">❌</button>
+    <button class="hatbtn" data-hat="1">🎉</button>
+    <button class="hatbtn" data-hat="2">🎩</button>
+    <button class="hatbtn" data-hat="3">👑</button>
+    <button class="hatbtn" data-hat="4">🧢</button>
+  </div>
+  <button id="playBtn">▶ Play</button>
+</div>
 <script>
 'use strict';
 // ---------- Config ----------
@@ -2637,6 +2691,58 @@ function generate(s) {
   })();
   // (No bunny burrows in the volcano: the dragon's ground stays clear.)
 
+  // Random spawn: anywhere on the main island's land — never water, lava,
+  // or a sandy ocean island (and not bare volcano stone either).
+  (function () {
+    // anchor on the main island (the old middle spawn always is), then
+    // flood its whole landmass; ocean islands flood separately and stay out
+    var spAx = W >> 1, spAy = H >> 1, spFound = false;
+    for (var spR = 0; spR < W && !spFound; spR++) {
+      for (var spY = -spR; spY <= spR && !spFound; spY++) {
+        for (var spX = -spR; spX <= spR && !spFound; spX++) {
+          if (Math.max(Math.abs(spX), Math.abs(spY)) !== spR) continue;
+          var spGx = (W >> 1) + spX, spGy = (H >> 1) + spY;
+          if (!inBounds(spGx, spGy)) continue;
+          var spGi = idx(spGx, spGy);
+          if ((biome[spGi] === GRASS || biome[spGi] === SAND) && !lava[spGi]) {
+            spAx = spGx; spAy = spGy; spFound = true;
+          }
+        }
+      }
+    }
+    var spMain = new Uint8Array(W * H);
+    var spQ = [[spAx, spAy]];
+    spMain[idx(spAx, spAy)] = 1;
+    while (spQ.length) {
+      var spC = spQ.pop();
+      var spDirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var spD = 0; spD < 4; spD++) {
+        var spNx = spC[0] + spDirs[spD][0], spNy = spC[1] + spDirs[spD][1];
+        if (!inBounds(spNx, spNy)) continue;
+        var spNi = idx(spNx, spNy);
+        if (spMain[spNi]) continue;
+        if (biome[spNi] !== GRASS && biome[spNi] !== SAND) continue;
+        if (lava[spNi]) continue;
+        spMain[spNi] = 1;
+        spQ.push([spNx, spNy]);
+      }
+    }
+    var spSpots = [];
+    for (var spYy = 0; spYy < H; spYy++) {
+      for (var spXx = 0; spXx < W; spXx++) {
+        var spIi = idx(spXx, spYy);
+        if (!spMain[spIi] || volc[spIi] || lava[spIi]) continue;
+        if (biome[spIi] !== GRASS && biome[spIi] !== SAND) continue;
+        spSpots.push(spIi);
+      }
+    }
+    if (spSpots.length) {
+      // Math.random (not the map rand) so every visit spawns somewhere new
+      var spPick = spSpots[(Math.random() * spSpots.length) | 0];
+      spawn = { x: spPick % W, y: (spPick / W) | 0 };
+    }
+  })();
+
   buildMinimap();
   return spawn;
 }
@@ -2709,6 +2815,12 @@ window.addEventListener('keydown', function (e) {
   keys[e.key.toLowerCase()] = true;
 });
 window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+// Lock page zoom: Cmd/Ctrl + plus/minus must not resize the fullscreen game
+window.addEventListener('keydown', function (e) {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  if (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_' ||
+      e.code === 'NumpadAdd' || e.code === 'NumpadSubtract') e.preventDefault();
+});
 
 // Touch joystick
 var joy = { active: false, id: null, bx: 0, by: 0, dx: 0, dy: 0 };
@@ -4539,13 +4651,8 @@ function hitsSolid(px, py) {
         continue;
       }
       if (solid[ti]) {
-        if (trees[ti] || stumps[ti] || palms[ti] || pines[ti] || acacias[ti] || cactus[ti] || deadTree[ti]) {
-          // only the trunk / stump core is solid — you can slip under leaves
-          var tcx = tx * TILE + TILE / 2, tcy = ty * TILE + TILE / 2;
-          var trad = trees[ti] ? 7 * treeScale(tx, ty) : (pines[ti] ? 4 * pineScale(tx, ty) : (stumps[ti] ? 7 * stumpScale(tx, ty) : (acacias[ti] ? 6 * acaciaScale(tx, ty) : (cactus[ti] ? 7 * cactusScale(tx, ty) : (deadTree[ti] ? 5 * deadScale(tx, ty) : 5 * palmScale(tx, ty))))));
-          var tdx = px - tcx, tdy = py - tcy, trr = r + trad;
-          if (tdx * tdx + tdy * tdy < trr * trr) return true;
-        } else {
+        if (trees[ti] || stumps[ti] || palms[ti] || pines[ti] || acacias[ti] || cactus[ti] || deadTree[ti]) continue; // trunk/stump cores glide in resolveTrunks
+        else {
           // circle vs tile rect
           var nx = Math.max(tx * TILE, Math.min(px, tx * TILE + TILE));
           var ny = Math.max(ty * TILE, Math.min(py, ty * TILE + TILE));
@@ -4558,6 +4665,134 @@ function hitsSolid(px, py) {
   return false;
 }
 
+// True for animals the player walks past: carried in the air, or tucked
+// invisible inside a hole or burrow (underground things don't block).
+function skipAnimal(a, skipCaught) {
+  if (!a) return true;
+  if (a.held || a.eagleHeld) return true;
+  if (a.state === 'inside' || a.state === 'hide') return true;
+  if (skipCaught && a.state === 'caught') return true;
+  return false;
+}
+// Every solid land animal: callback(a, bodyRadius, skipCaught, weight).
+// Weights are hidden: heavier bodies shove lighter ones aside (plants,
+// rocks and trunks never budge). The player weighs PLAYER_W.
+var PLAYER_W = 20;
+function eachLandAnimal(cb) {
+  var i;
+  for (i = 0; i < bunnies.length; i++) cb(bunnies[i], 7, true, 4);
+  for (i = 0; i < jacks.length; i++) cb(jacks[i], 7, false, 5);
+  for (i = 0; i < hedgehogs.length; i++) cb(hedgehogs[i], 6, true, 5);
+  for (i = 0; i < warthogs.length; i++) cb(warthogs[i], 10, false, 35);
+  for (i = 0; i < hyenas.length; i++) cb(hyenas[i], 9, false, 30);
+  for (i = 0; i < armadillos.length; i++) cb(armadillos[i], 7, false, 12);
+  for (i = 0; i < grizzlies.length; i++) cb(grizzlies[i], 13, false, 90);
+  for (i = 0; i < lizards.length; i++) cb(lizards[i], 4, false, 2);
+  for (i = 0; i < tarantulas.length; i++) cb(tarantulas[i], 5, false, 3);
+  for (i = 0; i < ants.length; i++) cb(ants[i], 3, false, 1);
+  for (i = 0; i < frogs.length; i++) cb(frogs[i], 4, false, 2);
+  for (i = 0; i < gators.length; i++) cb(gators[i], 12, false, 25);
+  for (i = 0; i < snakes.length; i++) cb(snakes[i], 4, false, 6);
+  for (i = 0; i < ducks.length; i++) cb(ducks[i], 6, false, 5);
+}
+// Standing on a hole (crab hole, burrow, lizard hole): animals can't come
+// out of it or duck into it while you're on top.
+var HOLE_R = 22;
+var pairBuf = []; // reused scratch list for resolveAnimalPairs
+function holeCovered(hx, hy, r) {
+  var dx = player.x - hx, dy = player.y - hy, rr = r || HOLE_R;
+  return dx * dx + dy * dy < rr * rr;
+}
+// Slide the player smoothly off animal bodies: after each move, ease out
+// of any overlap along the contact normal, so round bodies glide past
+// each other head-on instead of catching on corners.
+function resolveAnimals() {
+  var pr = player.r * 0.7;
+  for (var pass = 0; pass < 2; pass++) {
+    var nudged = false;
+    eachLandAnimal(function (a, rad, skipCaught, w) {
+      if (skipAnimal(a, skipCaught)) return;
+      var ssc = a.sc || 1;
+      var rr = pr + rad * ssc, wb = w * ssc, tot = PLAYER_W + wb;
+      var dx = player.x - a.x, dy = player.y - a.y;
+      var d2 = dx * dx + dy * dy;
+      if (d2 < rr * rr && d2 > 0.0001) {
+        var d = Math.sqrt(d2), give = rr - d;
+        player.x += dx / d * give * (wb / tot);
+        player.y += dy / d * give * (wb / tot);
+        a.x -= dx / d * give * (PLAYER_W / tot);
+        a.y -= dy / d * give * (PLAYER_W / tot);
+        nudged = true;
+      }
+    });
+    for (var c = 0; c < crabHoles.length; c++) { // only crabs out of their holes
+      var ch = crabHoles[c];
+      if (ch.state !== 'out') continue;
+      var crr = pr + 5, ctot = PLAYER_W + 2;
+      var cdx = player.x - ch.cx, cdy = player.y - ch.cy;
+      var cd2 = cdx * cdx + cdy * cdy;
+      if (cd2 < crr * crr && cd2 > 0.0001) {
+        var cd = Math.sqrt(cd2), cgive = crr - cd;
+        player.x += cdx / cd * cgive * (2 / ctot);
+        player.y += cdy / cd * cgive * (2 / ctot);
+        ch.cx -= cdx / cd * cgive * (PLAYER_W / ctot);
+        ch.cy -= cdy / cd * cgive * (PLAYER_W / ctot);
+        nudged = true;
+      }
+    }
+    if (secretary && !skipAnimal(secretary, false)) {
+      var ssc = secretary.sc || 1;
+      var srr = pr + 8 * ssc, stot = PLAYER_W + 12 * ssc;
+      var sdx = player.x - secretary.x, sdy = player.y - secretary.y;
+      var sd2 = sdx * sdx + sdy * sdy;
+      if (sd2 < srr * srr && sd2 > 0.0001) {
+        var sd = Math.sqrt(sd2), sgive = srr - sd;
+        player.x += sdx / sd * sgive * (12 * ssc / stot);
+        player.y += sdy / sd * sgive * (12 * ssc / stot);
+        secretary.x -= sdx / sd * sgive * (PLAYER_W / stot);
+        secretary.y -= sdy / sd * sgive * (PLAYER_W / stot);
+        nudged = true;
+      }
+    }
+    if (!nudged) break;
+  }
+}
+// Glide the player smoothly off tree trunks and stumps: the same trunk
+// cores as before, but eased along the circle (round bodies glide past)
+// instead of catching on axis walls.
+function resolveTrunks() {
+  var pr = player.r - 3;
+  var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+  for (var pass = 0; pass < 2; pass++) {
+    var nudged = false;
+    for (var ty = pty - 2; ty <= pty + 2; ty++) {
+      for (var tx = ptx - 2; tx <= ptx + 2; tx++) {
+        if (!inBounds(tx, ty)) continue;
+        var ti = idx(tx, ty);
+        var trad = 0;
+        if (trees[ti]) trad = 7 * treeScale(tx, ty);
+        else if (pines[ti]) trad = 4 * pineScale(tx, ty);
+        else if (stumps[ti]) trad = 7 * stumpScale(tx, ty);
+        else if (acacias[ti]) trad = 6 * acaciaScale(tx, ty);
+        else if (cactus[ti]) trad = 7 * cactusScale(tx, ty);
+        else if (deadTree[ti]) trad = 5 * deadScale(tx, ty);
+        else if (palms[ti]) trad = 5 * palmScale(tx, ty);
+        else continue;
+        var tcx = tx * TILE + TILE / 2, tcy = ty * TILE + TILE / 2;
+        var dx = player.x - tcx, dy = player.y - tcy;
+        var rr = pr + trad;
+        var d2 = dx * dx + dy * dy;
+        if (d2 < rr * rr && d2 > 0.0001) {
+          var d = Math.sqrt(d2);
+          player.x = tcx + dx / d * rr;
+          player.y = tcy + dy / d * rr;
+          nudged = true;
+        }
+      }
+    }
+    if (!nudged) break;
+  }
+}
 // Safety net: if the player ever ends up inside something solid
 // (lag spike, edge case), push them back out to its surface.
 function resolveSolids() {
@@ -4707,6 +4942,8 @@ function update(dt) {
       if (!hitsSolid(player.x, player.y + isy)) player.y += isy;
       else iceVy = 0;
     }
+    resolveAnimals();
+    resolveTrunks();
   } else {
     iceVx = 0; iceVy = 0;
     var speed = (keys['shift'] ? 340 : 220) * (inMud ? 0.25 : (inWater ? 0.5 : 1)) * dt;
@@ -4719,6 +4956,8 @@ function update(dt) {
       var ny = player.y + sy;
       if (!hitsSolid(player.x, ny)) player.y = ny;
     }
+    resolveAnimals();
+    resolveTrunks();
   }
   player.x = Math.max(player.r, Math.min(WORLD_PX - player.r, player.x));
   player.y = Math.max(player.r, Math.min(WORLD_PY - player.r, player.y));
@@ -4878,19 +5117,27 @@ function update(dt) {
     if (ch.state === 'hidden') {
       ch.timer -= dt;
       if (ch.timer <= 0) {
-        ch.state = 'out';
-        ch.timer = 4 + Math.random() * 2;
-        ch.cx = ch.x; ch.cy = ch.y;
-        ch.pause = 0;
-        crabDart(ch);
+        if (holeCovered(ch.x, ch.y)) ch.timer = 1 + Math.random(); // camper on the hole: wait
+        else {
+          ch.state = 'out';
+          ch.timer = 4 + Math.random() * 2;
+          ch.cx = ch.x; ch.cy = ch.y;
+          ch.pause = 0;
+          crabDart(ch);
+        }
       }
       continue;
     }
     var cdx = ch.tx - ch.cx, cdy = ch.ty - ch.cy;
     var cdd = Math.hypot(cdx, cdy);
     if (ch.state === 'return' && cdd < 5) {
-      ch.state = 'hidden';
-      ch.timer = 25 + Math.random() * 35;
+      if (holeCovered(ch.x, ch.y)) { // camper: can't duck in, skitter back out
+        ch.state = 'out'; ch.timer = 3 + Math.random() * 2; ch.pause = 0;
+        crabDart(ch);
+      } else {
+        ch.state = 'hidden';
+        ch.timer = 25 + Math.random() * 35;
+      }
       continue;
     }
     if (ch.pause > 0) { ch.pause -= dt; }
@@ -5324,7 +5571,10 @@ function update(dt) {
       else {
         bn.heading = Math.atan2(bn.home.y - bn.y, bn.home.x - bn.x);
         var hmdx = bn.home.x - bn.x, hmdy = bn.home.y - bn.y;
-        if (hmdx * hmdx + hmdy * hmdy < 10 * 10) { bn.state = 'inside'; bn.timer = 5 + Math.random() * 5; }
+        if (hmdx * hmdx + hmdy * hmdy < 10 * 10) {
+          if (holeCovered(bn.home.x, bn.home.y)) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5; }
+          else { bn.state = 'inside'; bn.timer = 5 + Math.random() * 5; }
+        }
         else {
           bunnyHop(bn, 80, dt);
           if (bn.timer <= 0) { bn.state = 'hop'; bn.resting = true; bn.timer = 0.5; }
@@ -5333,8 +5583,11 @@ function update(dt) {
     } else { // 'inside': cozy in the burrow, then pop back out
       bn.timer -= dt;
       if (bn.timer <= 0) {
-        if (bn.home) { bn.x = bn.home.x; bn.y = bn.home.y; }
-        bn.state = 'hop'; bn.resting = true; bn.timer = 0.5;
+        if (bn.home && holeCovered(bn.home.x, bn.home.y)) bn.timer = 1; // camper: stay cozy
+        else {
+          if (bn.home) { bn.x = bn.home.x; bn.y = bn.home.y; }
+          bn.state = 'hop'; bn.resting = true; bn.timer = 0.5;
+        }
       }
     }
   }
@@ -5925,8 +6178,11 @@ function update(dt) {
       // tucked inside the hole, invisible
       lz.timer -= dt;
       if (lz.timer <= 0) {
-        if (lz.home) { lz.x = lz.home.x; lz.y = lz.home.y; }
-        lz.state = 'bask'; lz.resting = true; lz.timer = 0.5 + Math.random();
+        if (lz.home && holeCovered(lz.home.x, lz.home.y)) lz.timer = 1; // camper: stay tucked
+        else {
+          if (lz.home) { lz.x = lz.home.x; lz.y = lz.home.y; }
+          lz.state = 'bask'; lz.resting = true; lz.timer = 0.5 + Math.random();
+        }
       }
       continue;
     }
@@ -5965,7 +6221,7 @@ function update(dt) {
         if (lhx * lhx + lhy * lhy < 8 * 8) {
           lz.resting = true;
           lz.timer = 0.5 + Math.random() * 2;
-          if (lz.homeward && Math.random() < 0.4) { // slip into the hole for a while
+          if (lz.homeward && Math.random() < 0.4 && !holeCovered(lz.home.x, lz.home.y)) { // slip into the hole for a while
             lz.state = 'hide'; lz.timer = 3 + Math.random() * 5;
           }
         }
@@ -6120,11 +6376,14 @@ function update(dt) {
       // squeezed under the boulder, invisible
       ta.timer -= dt;
       if (ta.timer <= 0) {
-        ta.x = ta.home.x + (Math.random() - 0.5) * 20;
-        ta.y = ta.home.y + 24 + Math.random() * 8; // pop out clear of the rock
-        var eguard = 0; // safety: never emerge inside the solid
-        while (rockBlocked(ta.x, ta.y) && eguard++ < 6) ta.y += 6;
-        ta.state = 'out'; ta.resting = true; ta.timer = 0.5 + Math.random();
+        if (holeCovered(ta.home.x, ta.home.y + 28, 20)) ta.timer = 1; // camper at the foot of the rock: wait
+        else {
+          ta.x = ta.home.x + (Math.random() - 0.5) * 20;
+          ta.y = ta.home.y + 24 + Math.random() * 8; // pop out clear of the rock
+          var eguard = 0; // safety: never emerge inside the solid
+          while (rockBlocked(ta.x, ta.y) && eguard++ < 6) ta.y += 6;
+          ta.state = 'out'; ta.resting = true; ta.timer = 0.5 + Math.random();
+        }
       }
       continue;
     }
@@ -6329,7 +6588,10 @@ function update(dt) {
       else {
         jk.heading = Math.atan2(jk.home.y - jk.y, jk.home.x - jk.x);
         var jkdx = jk.home.x - jk.x, jkdy = jk.home.y - jk.y;
-        if (jkdx * jkdx + jkdy * jkdy < 10 * 10) { jk.state = 'inside'; jk.timer = 5 + Math.random() * 5; }
+        if (jkdx * jkdx + jkdy * jkdy < 10 * 10) {
+          if (holeCovered(jk.home.x, jk.home.y)) { jk.state = 'hop'; jk.resting = true; jk.timer = 0.5; }
+          else { jk.state = 'inside'; jk.timer = 5 + Math.random() * 5; }
+        }
         else {
           jackHop(jk, 80, dt);
           if (jk.timer <= 0) { jk.state = 'hop'; jk.resting = true; jk.timer = 0.5; }
@@ -6338,8 +6600,11 @@ function update(dt) {
     } else { // 'inside': cozy in the burrow, then pop back out
       jk.timer -= dt;
       if (jk.timer <= 0) {
-        if (jk.home) { jk.x = jk.home.x; jk.y = jk.home.y; }
-        jk.state = 'hop'; jk.resting = true; jk.timer = 0.5;
+        if (jk.home && holeCovered(jk.home.x, jk.home.y)) jk.timer = 1; // camper: stay cozy
+        else {
+          if (jk.home) { jk.x = jk.home.x; jk.y = jk.home.y; }
+          jk.state = 'hop'; jk.resting = true; jk.timer = 0.5;
+        }
       }
     }
   }
@@ -8045,6 +8310,127 @@ function update(dt) {
           dg.x = dnx2; dg.y = dny2;
         }
       }
+    }
+  }
+  // Pairs first so the player pass below has the last word: nothing
+  // overlaps the player once the frame ends.
+  resolveAnimalPairs();
+  // Animals can't walk into the player either: overlaps are split by
+  // weight — heavier bodies shove lighter ones aside (tiny nudges, since
+  // overlaps never grow past a frame of wandering).
+  var pushR = player.r * 0.7;
+  eachLandAnimal(function (a, rad, skipCaught, w) {
+    if (skipAnimal(a, skipCaught)) return;
+    var ssc = a.sc || 1;
+    var rr = pushR + rad * ssc, wb = w * ssc, tot = PLAYER_W + wb;
+    var pdx = a.x - player.x, pdy = a.y - player.y;
+    var pd2 = pdx * pdx + pdy * pdy;
+    if (pd2 < rr * rr) {
+      if (pd2 > 0.01) {
+        var pd = Math.sqrt(pd2), push = rr - pd;
+        player.x -= pdx / pd * push * (wb / tot);
+        player.y -= pdy / pd * push * (wb / tot);
+        a.x += pdx / pd * push * (PLAYER_W / tot);
+        a.y += pdy / pd * push * (PLAYER_W / tot);
+      } else {
+        var pha = a.heading || 0;
+        a.x = player.x + Math.cos(pha) * rr;
+        a.y = player.y + Math.sin(pha) * rr;
+      }
+    }
+  });
+  for (var chi2 = 0; chi2 < crabHoles.length; chi2++) { // out crabs get eased out too
+    var ch2 = crabHoles[chi2];
+    if (ch2.state !== 'out') continue;
+    var crr2 = pushR + 5, ctot2 = PLAYER_W + 2;
+    var cdx2 = ch2.cx - player.x, cdy2 = ch2.cy - player.y;
+    var cd22 = cdx2 * cdx2 + cdy2 * cdy2;
+    if (cd22 < crr2 * crr2 && cd22 > 0.01) {
+      var cd2 = Math.sqrt(cd22), cpush = crr2 - cd2;
+      player.x -= cdx2 / cd2 * cpush * (2 / ctot2);
+      player.y -= cdy2 / cd2 * cpush * (2 / ctot2);
+      ch2.cx += cdx2 / cd2 * cpush * (PLAYER_W / ctot2);
+      ch2.cy += cdy2 / cd2 * cpush * (PLAYER_W / ctot2);
+    }
+  }
+// Animals can't run into each other either: every overlapping pair of
+// land animals is eased apart — except a hunter with its own catch, so
+// snakes, gators, spiders, hyenas, bears and birds can still grab prey.
+function resolveAnimalPairs() {
+  pairBuf.length = 0;
+  eachLandAnimal(function (a, rad, skip, w) {
+    if (a.held || a.eagleHeld) return;
+    if (a.state === 'caught' || a.state === 'inside' || a.state === 'hide') return;
+    var ssc = a.sc || 1;
+    pairBuf.push(a, rad * ssc, w * ssc);
+  });
+  if (secretary && !secretary.held && !secretary.eagleHeld && secretary.state !== 'caught') {
+    pairBuf.push(secretary, 8 * (secretary.sc || 1), 12 * (secretary.sc || 1));
+  }
+  var n = pairBuf.length / 3, i, j;
+  for (i = 0; i < n; i++) {
+    var a = pairBuf[i * 3], ra = pairBuf[i * 3 + 1], wa = pairBuf[i * 3 + 2];
+    for (j = i + 1; j < n; j++) {
+      var b = pairBuf[j * 3], rb = pairBuf[j * 3 + 1], wb = pairBuf[j * 3 + 2];
+      if (a.prey === b || b.prey === a) continue; // hunter and its catch stay together
+      var dx = b.x - a.x, dy = b.y - a.y;
+      var rr = ra + rb, tot = wa + wb;
+      var d2 = dx * dx + dy * dy;
+      if (d2 < rr * rr) {
+        var d = Math.sqrt(d2), nx, ny, dd = d;
+        if (d2 > 0.0001) { nx = dx / d; ny = dy / d; }
+        else { var ha0 = ((i + j) % 2) * Math.PI; nx = Math.cos(ha0); ny = Math.sin(ha0); dd = 0; }
+        var shove = rr - dd;
+        a.x -= nx * shove * (wb / tot); a.y -= ny * shove * (wb / tot);
+        b.x += nx * shove * (wa / tot); b.y += ny * shove * (wa / tot);
+      }
+    }
+  }
+  // crabs vs everybody + each other (crab spots live in cx/cy, weight 2)
+  for (var ci = 0; ci < crabHoles.length; ci++) {
+    var ch0 = crabHoles[ci];
+    if (ch0.state !== 'out') continue;
+    for (var k = 0; k < n; k++) {
+      var o = pairBuf[k * 3], ro = pairBuf[k * 3 + 1], wo = pairBuf[k * 3 + 2];
+      var ox = o.x - ch0.cx, oy = o.y - ch0.cy;
+      var orr = ro + 5, otot = wo + 2;
+      var od2 = ox * ox + oy * oy;
+      if (od2 < orr * orr) {
+        var od = Math.sqrt(od2), onx, ony, odd = od;
+        if (od2 > 0.0001) { onx = ox / od; ony = oy / od; }
+        else { onx = 1; ony = 0; odd = 0; }
+        var opush = orr - odd;
+        ch0.cx -= onx * opush * (wo / otot); ch0.cy -= ony * opush * (wo / otot);
+        o.x += onx * opush * (2 / otot); o.y += ony * opush * (2 / otot);
+      }
+    }
+    for (var k2 = ci + 1; k2 < crabHoles.length; k2++) {
+      var ch1 = crabHoles[k2];
+      if (ch1.state !== 'out') continue;
+      var ex = ch1.cx - ch0.cx, ey = ch1.cy - ch0.cy;
+      var ed2 = ex * ex + ey * ey;
+      if (ed2 < 100) {
+        var ed = Math.sqrt(ed2), enx, eny, edd = ed;
+        if (ed2 > 0.0001) { enx = ex / ed; eny = ey / ed; }
+        else { enx = 0; eny = 1; edd = 0; }
+        var epush = (10 - edd) / 2;
+        ch0.cx -= enx * epush; ch0.cy -= eny * epush;
+        ch1.cx += enx * epush; ch1.cy += eny * epush;
+      }
+    }
+  }
+}
+  if (secretary && !skipAnimal(secretary, false)) {
+    var ssc2 = secretary.sc || 1;
+    var srr2 = pushR + 8 * ssc2, stot2 = PLAYER_W + 12 * ssc2;
+    var sdx2 = secretary.x - player.x, sdy2 = secretary.y - player.y;
+    var sd22 = sdx2 * sdx2 + sdy2 * sdy2;
+    if (sd22 < srr2 * srr2 && sd22 > 0.01) {
+      var sd2 = Math.sqrt(sd22), spush = srr2 - sd2;
+      player.x -= sdx2 / sd2 * spush * (12 * ssc2 / stot2);
+      player.y -= sdy2 / sd2 * spush * (12 * ssc2 / stot2);
+      secretary.x += sdx2 / sd2 * spush * (PLAYER_W / stot2);
+      secretary.y += sdy2 / sd2 * spush * (PLAYER_W / stot2);
     }
   }
   coordsEl.textContent = 'x: ' + Math.floor(player.x / TILE) + ', y: ' + Math.floor(player.y / TILE);
@@ -10252,8 +10638,8 @@ function drawSeagull(gu) {
 function drawEagle(eg) {
   // Bald eagle from above: dark brown wings and body, white head and tail,
   // yellow hooked beak. Folded wings and a pecking head while eating on a
-  // treetop. Carried fish draw crosswise in the beak.
-  var sc = eg.sc;
+  // treetop. Perched birds draw smaller (0.8x) than soaring ones.
+  var sc = eg.sc * (eg.state === 'eat' ? 0.8 : 1);
   var wing = Math.sin(eg.flap); // -1 tucked .. +1 raised
   // Picture eagles: eagle-sit.png while eating on the treetop,
   // eagle-fly.png everywhere else. Falls back to the canvas eagle until
@@ -10522,6 +10908,14 @@ if (typeof Image !== 'undefined') {
   playerHit3Img.src = 'playerHit3.svg';
 }
 var playerFrameImgs = [playerImg, playerHit1Img, playerHit2Img, playerHit3Img];
+// Crown art for the crown hat: crown.svg next to mope-survival.html.
+// Until it loads, the canvas crown below shows instead.
+var crownImg = null, crownImgOk = false;
+if (typeof Image !== 'undefined') {
+  crownImg = new Image();
+  crownImg.onload = function () { crownImgOk = true; };
+  crownImg.src = 'crown.svg';
+}
 var playerFrameSize = [[107.40052, 98.02492], [106.90952, 104.40797], [106.41852, 109.80901], [103.4725, 118.15607]];
 var FRAME_ANCH_X = 53.70026, FRAME_ANCH_Y = 49.01246; // body center, same paper spot in every frame
 var SWING_SEQ = [0, 1, 2, 3, 2, 1, 0]; // hit animation frames, ends resting on player
@@ -10934,6 +11328,45 @@ function drawDolphin(dl) {
   ctx.closePath(); ctx.fill();
   ctx.restore();
 }
+ // Hats picked on the start screen, drawn glued to the head in the
+ // player's rotated frame (facing +y): 0 none, 1 party hat, 2 top hat,
+ // 3 crown, 4 cap (brim toward the facing side).
+function drawHat(u) {
+  if (selectedHat === 1) { // party hat
+    ctx.fillStyle = '#7c4dff';
+    ctx.beginPath(); ctx.moveTo(0, -22 * u); ctx.lineTo(-8 * u, -4 * u); ctx.lineTo(8 * u, -4 * u); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffeb3b';
+    ctx.beginPath(); ctx.moveTo(-4.5 * u, -10.5 * u); ctx.lineTo(4.5 * u, -10.5 * u); ctx.lineTo(2.8 * u, -14 * u); ctx.lineTo(-2.8 * u, -14 * u); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(0, -22 * u, 3 * u, 0, 7); ctx.fill();
+  } else if (selectedHat === 2) { // top hat
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.ellipse(0, -5 * u, 11 * u, 4 * u, 0, 0, 7); ctx.fill();
+    ctx.fillRect(-7 * u, -19 * u, 14 * u, 15 * u);
+    ctx.fillStyle = '#c62828';
+    ctx.fillRect(-7 * u, -9 * u, 14 * u, 3.5 * u);
+  } else if (selectedHat === 3) { // crown: your crown.svg art, sunk onto the head
+    if (typeof crownImgOk !== 'undefined' && crownImgOk) {
+      var cwd = 85 * u, chd = cwd * crownImg.height / crownImg.width;
+      ctx.drawImage(crownImg, -cwd / 2, -4 * u - chd, cwd, chd);
+    } else {
+      ctx.fillStyle = '#ffd700';
+      ctx.strokeStyle = '#a97c00'; ctx.lineWidth = 1.5 * u;
+      ctx.beginPath();
+      ctx.moveTo(-9 * u, -4 * u); ctx.lineTo(-9 * u, -14 * u); ctx.lineTo(-4.5 * u, -8 * u);
+      ctx.lineTo(0, -17 * u); ctx.lineTo(4.5 * u, -8 * u); ctx.lineTo(9 * u, -14 * u); ctx.lineTo(9 * u, -4 * u);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#e53935';
+      ctx.beginPath(); ctx.arc(0, -9 * u, 1.8 * u, 0, 7); ctx.fill();
+    }
+  } else if (selectedHat === 4) { // cap
+    ctx.fillStyle = '#d23c3c';
+    ctx.beginPath(); ctx.arc(0, -4 * u, 9 * u, Math.PI, 0); ctx.fill();
+    ctx.fillRect(-9 * u, -4 * u, 18 * u, 2 * u);
+    ctx.fillStyle = '#8e2323';
+    ctx.beginPath(); ctx.ellipse(0, 5 * u, 9 * u, 3.5 * u, 0, 0, 7); ctx.fill();
+  }
+}
 function drawPlayer(sx, sy, t) {
   // Small round explorer (smaller than a tree); fades when hiding.
   // Uses player.svg if it loaded, otherwise the built-in blue circle.
@@ -10968,6 +11401,7 @@ function drawPlayer(sx, sy, t) {
     var fscale = S / playerFrameSize[0][0];
     var dw = fscale * playerFrameSize[fIdx][0], dh = fscale * playerFrameSize[fIdx][1];
     ctx.drawImage(useImg, -fscale * FRAME_ANCH_X, -fscale * FRAME_ANCH_Y, dw, dh);
+    drawHat(fscale);
     ctx.restore();
     ctx.globalAlpha = 1;
     return;
@@ -10987,6 +11421,11 @@ function drawPlayer(sx, sy, t) {
   ctx.fillStyle = '#10233f';
   ctx.beginPath(); ctx.arc(cx + ex * 3.6 + ldx, cy + ey * 3.6 + ldy, 1.3, 0, 7); ctx.fill();
   ctx.beginPath(); ctx.arc(cx - ex * 3.6 + ldx, cy - ey * 3.6 + ldy, 1.3, 0, 7); ctx.fill();
+  ctx.save();
+  ctx.translate(sx, sy + bob * 0.4);
+  ctx.rotate(Math.atan2(ldy, ldx) - Math.PI / 2);
+  drawHat(0.5);
+  ctx.restore();
   ctx.globalAlpha = 1;
 }
 
@@ -11883,11 +12322,42 @@ function render(t, rdt) {
 }
 
 // ---------- Main loop ----------
+// The game waits on the Play button: the world renders behind the menu
+// but nothing moves until play is pressed.
+var playing = false;
+var menuEl = document.getElementById('menu');
+document.getElementById('playBtn').addEventListener('click', function () {
+  menuEl.style.display = 'none';
+  playing = true;
+});
+// Hat picker on the start screen (remembered between visits)
+var selectedHat = 0;
+try {
+  var savedHat = parseInt(localStorage.getItem('mopeHat') || '0', 10);
+  if (savedHat >= 0 && savedHat <= 4) selectedHat = savedHat;
+} catch (e) {}
+var hatBtns = document.querySelectorAll('#hatRow .hatbtn');
+function refreshHatSel() {
+  for (var hi = 0; hi < hatBtns.length; hi++) {
+    var on = +hatBtns[hi].getAttribute('data-hat') === selectedHat;
+    hatBtns[hi].className = 'hatbtn' + (on ? ' sel' : '');
+  }
+}
+for (var hj = 0; hj < hatBtns.length; hj++) {
+  (function (hb) {
+    hb.addEventListener('click', function () {
+      selectedHat = +hb.getAttribute('data-hat');
+      try { localStorage.setItem('mopeHat', String(selectedHat)); } catch (e2) {}
+      refreshHatSel();
+    });
+  })(hatBtns[hj]);
+}
+refreshHatSel();
 var last = performance.now();
 function loop(now) {
   var dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  update(dt);
+  if (playing) update(dt);
   render(now, dt);
   requestAnimationFrame(loop);
 }
