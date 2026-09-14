@@ -231,6 +231,9 @@ var mushScore = 0;
 var woodN = new Uint8Array(W * H); // wood stocked on a tree trunk (0-3)
 var woodT = new Float32Array(W * H); // wood regrow timer
 var woodScore = 0;
+var treeHits = new Uint8Array(W * H); // hits taken per trunk (20 fells it)
+var stumpWas = new Uint8Array(W * H); // felled stump's tree: 1 tree 2 pine 3 palm 4 acacia (0 = natural stump)
+var stumpRegT = new Float32Array(W * H); // seconds until a felled stump regrows (0 = never)
 var seed = 20260906;
 var score = 0, eatCd = 0, splashT = 0, duckCheckT = 0, bunCheckT = 0, fishCheckT = 0, hedgeCheckT = 0;
 var MIN_POND_FISH = 35; // ponds + lake, always at least this many
@@ -4922,8 +4925,31 @@ function updateAnimalCounts() {
   for (var i = 0; i < rows.length; i++) html += rows[i][0] + ': ' + rows[i][1] + '<br>';
   animalsEl.innerHTML = html;
 }
+var TREE_HITS = 20, TREE_REGROW = 180; // hits to fell a tree, seconds for its stump to regrow
+// Fell a trunk into a stump (stays solid like a natural stump, regrows in 3 minutes)
+function fellTree(ti) {
+  var kind = 1, was = 1;
+  if (pines[ti]) { kind = 2; was = 2; }
+  else if (acacias[ti]) { kind = 3; was = 4; }
+  else if (palms[ti]) { kind = 1; was = 3; }
+  trees[ti] = 0; pines[ti] = 0; palms[ti] = 0; acacias[ti] = 0;
+  woodN[ti] = 0; woodT[ti] = 0; treeHits[ti] = 0;
+  stumps[ti] = 1; stumpKind[ti] = kind; stumpWas[ti] = was; stumpRegT[ti] = TREE_REGROW;
+}
+// A felled stump grows back into whatever tree it was (mushrooms clear out)
+function regrowTree(ti) {
+  var was = stumpWas[ti];
+  stumps[ti] = 0; stumpKind[ti] = 0; stumpWas[ti] = 0; stumpRegT[ti] = 0;
+  mushN[ti] = 0; mushT[ti] = 0;
+  if (was === 2) pines[ti] = 1;
+  else if (was === 3) palms[ti] = 1;
+  else if (was === 4) acacias[ti] = 1;
+  else trees[ti] = 1;
+  woodN[ti] = 3; woodT[ti] = 0;
+}
 // Whack the nearest woody trunk in reach that you're facing: +1 wood
-// (each trunk stocks 3, regrowing like berries). Runs on every swing.
+// (each trunk stocks 3, regrowing like berries), and every hit counts
+// toward the 20 that fell it. Runs on every swing.
 function tryHarvestWood() {
   var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
   var ldx = player.fx, ldy = player.fy;
@@ -4941,7 +4967,6 @@ function tryHarvestWood() {
       if (!inBounds(tx, ty)) continue;
       var ti = idx(tx, ty);
       if (!trees[ti] && !pines[ti] && !palms[ti] && !acacias[ti]) continue;
-      if (!woodN[ti]) continue;
       var cx = tx * TILE + TILE / 2, cy = ty * TILE + TILE / 2;
       var dx = cx - player.x, dy = cy - player.y;
       var d2 = dx * dx + dy * dy;
@@ -4952,11 +4977,14 @@ function tryHarvestWood() {
     }
   }
   if (best === -1) return;
-  woodN[best]--;
-  if (woodN[best] < 3 && woodT[best] > 30) woodT[best] = 0;
-  if (!woodN[best]) woodT[best] = 0;
-  woodScore++;
-  woodEl.textContent = '🪵 Wood: ' + woodScore;
+  if (woodN[best] > 0) {
+    woodN[best]--;
+    if (woodN[best] < 3 && woodT[best] > 30) woodT[best] = 0;
+    if (!woodN[best]) woodT[best] = 0;
+    woodScore++;
+    woodEl.textContent = '🪵 Wood: ' + woodScore;
+  }
+  if (++treeHits[best] >= TREE_HITS) fellTree(best);
 }
 function update(dt) {
   var dx = 0, dy = 0;
@@ -5045,6 +5073,10 @@ function update(dt) {
     if ((trees[bi] || pines[bi] || palms[bi] || acacias[bi]) && woodN[bi] < 3) {
       woodT[bi] += dt;
       if (woodT[bi] > 30) { woodN[bi]++; woodT[bi] = 0; }
+    }
+    if (stumps[bi] && stumpRegT[bi] > 0) {
+      stumpRegT[bi] -= dt;
+      if (stumpRegT[bi] <= 0) regrowTree(bi);
     }
   }
   // Munch berries by touching a bush
