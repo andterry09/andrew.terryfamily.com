@@ -12308,17 +12308,6 @@ function render(t, rdt) {
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 1;
   ctx.stroke();
-  // an orange dot tracking each eagle
-  for (var egi3 = 0; egi3 < eagles.length; egi3++) {
-    var eg3 = eagles[egi3];
-    ctx.fillStyle = '#ff9d00';
-    ctx.beginPath();
-    ctx.arc(mx + (eg3.x / WORLD_PX) * mm, my + (eg3.y / WORLD_PY) * mm, 2.5, 0, 7);
-    ctx.fill();
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
 }
 
 // ---------- Main loop ----------
