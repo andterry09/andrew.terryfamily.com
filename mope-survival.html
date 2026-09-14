@@ -228,8 +228,6 @@ var open = new Uint8Array(W * H); // open field: grass with no trees nearby
 var mushN = new Uint8Array(W * H); // mushrooms on a stump (0-3)
 var mushT = new Float32Array(W * H); // mushroom regrow timer
 var mushScore = 0;
-var woodN = new Uint8Array(W * H); // wood stocked on a tree trunk (0-3)
-var woodT = new Float32Array(W * H); // wood regrow timer
 var woodScore = 0;
 var treeHits = new Uint8Array(W * H); // hits taken per trunk (20 fells it)
 var stumpWas = new Uint8Array(W * H); // felled stump's tree: 1 tree 2 pine 3 palm 4 acacia (0 = natural stump)
@@ -2750,11 +2748,6 @@ function generate(s) {
     }
   })();
 
-  // Every woody trunk starts stocked with 3 wood (regrows like berries)
-  for (var wi = 0; wi < W * H; wi++) {
-    if (trees[wi] || pines[wi] || palms[wi] || acacias[wi]) { woodN[wi] = 3; woodT[wi] = 0; }
-  }
-
   buildMinimap();
   return spawn;
 }
@@ -4933,7 +4926,7 @@ function fellTree(ti) {
   else if (acacias[ti]) { kind = 3; was = 4; }
   else if (palms[ti]) { kind = 1; was = 3; }
   trees[ti] = 0; pines[ti] = 0; palms[ti] = 0; acacias[ti] = 0;
-  woodN[ti] = 0; woodT[ti] = 0; treeHits[ti] = 0;
+  treeHits[ti] = 0;
   stumps[ti] = 1; stumpKind[ti] = kind; stumpWas[ti] = was; stumpRegT[ti] = TREE_REGROW;
 }
 // A felled stump grows back into whatever tree it was (mushrooms clear out)
@@ -4945,11 +4938,10 @@ function regrowTree(ti) {
   else if (was === 3) palms[ti] = 1;
   else if (was === 4) acacias[ti] = 1;
   else trees[ti] = 1;
-  woodN[ti] = 3; woodT[ti] = 0;
 }
 // Whack the nearest woody trunk in reach that you're facing: +1 wood
-// (each trunk stocks 3, regrowing like berries), and every hit counts
-// toward the 20 that fell it. Runs on every swing.
+// every hit, and every hit counts toward the 20 that fell it.
+// Runs on every swing.
 function tryHarvestWood() {
   var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
   var ldx = player.fx, ldy = player.fy;
@@ -4977,13 +4969,8 @@ function tryHarvestWood() {
     }
   }
   if (best === -1) return;
-  if (woodN[best] > 0) {
-    woodN[best]--;
-    if (woodN[best] < 3 && woodT[best] > 30) woodT[best] = 0;
-    if (!woodN[best]) woodT[best] = 0;
-    woodScore++;
-    woodEl.textContent = '🪵 Wood: ' + woodScore;
-  }
+  woodScore++;
+  woodEl.textContent = '🪵 Wood: ' + woodScore;
   if (++treeHits[best] >= TREE_HITS) fellTree(best);
 }
 function update(dt) {
@@ -5069,10 +5056,6 @@ function update(dt) {
     if (stumps[bi] && mushN[bi] < 3) {
       mushT[bi] += dt;
       if (mushT[bi] > 20) { mushN[bi]++; mushT[bi] = 0; }
-    }
-    if ((trees[bi] || pines[bi] || palms[bi] || acacias[bi]) && woodN[bi] < 3) {
-      woodT[bi] += dt;
-      if (woodT[bi] > 30) { woodN[bi]++; woodT[bi] = 0; }
     }
     if (stumps[bi] && stumpRegT[bi] > 0) {
       stumpRegT[bi] -= dt;
