@@ -115,6 +115,7 @@
   <div id="coords">x: 0, y: 0</div>
   <div id="berries">🫐 Berries: 0</div>
   <div id="shrooms">🍄 Mushrooms: 0</div>
+  <div id="wood">🪵 Wood: 0</div>
   <div class="subtitle">🐾 Animals</div>
   <div id="animals">…</div>
 </div>
@@ -227,6 +228,9 @@ var open = new Uint8Array(W * H); // open field: grass with no trees nearby
 var mushN = new Uint8Array(W * H); // mushrooms on a stump (0-3)
 var mushT = new Float32Array(W * H); // mushroom regrow timer
 var mushScore = 0;
+var woodN = new Uint8Array(W * H); // wood stocked on a tree trunk (0-3)
+var woodT = new Float32Array(W * H); // wood regrow timer
+var woodScore = 0;
 var seed = 20260906;
 var score = 0, eatCd = 0, splashT = 0, duckCheckT = 0, bunCheckT = 0, fishCheckT = 0, hedgeCheckT = 0;
 var MIN_POND_FISH = 35; // ponds + lake, always at least this many
@@ -2743,6 +2747,11 @@ function generate(s) {
     }
   })();
 
+  // Every woody trunk starts stocked with 3 wood (regrows like berries)
+  for (var wi = 0; wi < W * H; wi++) {
+    if (trees[wi] || pines[wi] || palms[wi] || acacias[wi]) { woodN[wi] = 3; woodT[wi] = 0; }
+  }
+
   buildMinimap();
   return spawn;
 }
@@ -2868,7 +2877,7 @@ window.addEventListener('mousedown', function (e) {
   mouseSX = e.clientX; mouseSY = e.clientY;
   mouseHeld = true;
   // Clicks obey the 0.3s cooldown too: only start a swing when idle and cooled down
-  if (swingFrame < 0 && swingCd <= 0) { swingFrame = 0; swingT = 0; }
+  if (swingFrame < 0 && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); }
 });
 window.addEventListener('mouseup', function () { mouseHeld = false; });
 
@@ -2891,6 +2900,7 @@ var coordsEl = document.getElementById('coords');
 var berriesEl = document.getElementById('berries');
 var hiddenEl = document.getElementById('hidden-badge');
 var shroomsEl = document.getElementById('shrooms');
+var woodEl = document.getElementById('wood');
 var animalsEl = document.getElementById('animals');
 var animalCountT = 99; // refresh the animal counts every 15s (starts high so it fills in on the first frame)
 
@@ -4912,6 +4922,42 @@ function updateAnimalCounts() {
   for (var i = 0; i < rows.length; i++) html += rows[i][0] + ': ' + rows[i][1] + '<br>';
   animalsEl.innerHTML = html;
 }
+// Whack the nearest woody trunk in reach that you're facing: +1 wood
+// (each trunk stocks 3, regrowing like berries). Runs on every swing.
+function tryHarvestWood() {
+  var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+  var ldx = player.fx, ldy = player.fy;
+  if (mouseSX >= 0) {
+    var mwx = cam.x + mouseSX / ZOOM, mwy = cam.y + mouseSY / ZOOM;
+    var mdx = mwx - player.x, mdy = mwy - player.y;
+    if (mdx * mdx + mdy * mdy > 4) {
+      var ml = Math.hypot(mdx, mdy);
+      ldx = mdx / ml; ldy = mdy / ml;
+    }
+  }
+  var best = -1, bd = 46 * 46;
+  for (var ty = pty - 2; ty <= pty + 2; ty++) {
+    for (var tx = ptx - 2; tx <= ptx + 2; tx++) {
+      if (!inBounds(tx, ty)) continue;
+      var ti = idx(tx, ty);
+      if (!trees[ti] && !pines[ti] && !palms[ti] && !acacias[ti]) continue;
+      if (!woodN[ti]) continue;
+      var cx = tx * TILE + TILE / 2, cy = ty * TILE + TILE / 2;
+      var dx = cx - player.x, dy = cy - player.y;
+      var d2 = dx * dx + dy * dy;
+      if (d2 > bd) continue;
+      var d = Math.sqrt(d2) || 1;
+      if ((dx / d) * ldx + (dy / d) * ldy < 0.2) continue; // must face it a bit
+      bd = d2; best = ti;
+    }
+  }
+  if (best === -1) return;
+  woodN[best]--;
+  if (woodN[best] < 3 && woodT[best] > 30) woodT[best] = 0;
+  if (!woodN[best]) woodT[best] = 0;
+  woodScore++;
+  woodEl.textContent = '🪵 Wood: ' + woodScore;
+}
 function update(dt) {
   var dx = 0, dy = 0;
   if (keys['a'] || keys['arrowleft']) dx -= 1;
@@ -4995,6 +5041,10 @@ function update(dt) {
     if (stumps[bi] && mushN[bi] < 3) {
       mushT[bi] += dt;
       if (mushT[bi] > 20) { mushN[bi]++; mushT[bi] = 0; }
+    }
+    if ((trees[bi] || pines[bi] || palms[bi] || acacias[bi]) && woodN[bi] < 3) {
+      woodT[bi] += dt;
+      if (woodT[bi] > 30) { woodN[bi]++; woodT[bi] = 0; }
     }
   }
   // Munch berries by touching a bush
@@ -8440,7 +8490,7 @@ function resolveAnimalPairs() {
     if (swingFrame >= SWING_SEQ.length) { swingFrame = -1; swingT = 0; swingCd = 0.3; }
   } else { // idle: cool down, then re-swing while held
     swingCd -= dt;
-    if (mouseHeld && swingCd <= 0) { swingFrame = 0; swingT = 0; }
+    if (mouseHeld && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); }
   }
   animalCountT += dt;
   if (animalCountT >= 15) { animalCountT = 0; updateAnimalCounts(); }
