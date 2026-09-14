@@ -36,8 +36,32 @@
     pointer-events: none;
   }
   #hud .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
-  #hud .subtitle { font-weight: bold; color: #7fd67f; font-size: 0.85rem; margin-top: 6px; }
-  #animals { font-size: 0.8rem; line-height: 1.4; }
+  #invBtn {
+    position: fixed;
+    top: 186px;
+    right: 12px;
+    z-index: 10;
+    font-size: 1.6rem;
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    background: rgba(13, 19, 27, 0.93);
+    cursor: pointer;
+  }
+  #invPanel {
+    position: fixed;
+    top: 250px;
+    right: 12px;
+    z-index: 10;
+    background: rgba(13, 19, 27, 0.93);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  #invPanel .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
   #hidden-badge {
     display: none;
     position: fixed;
@@ -113,11 +137,11 @@
 <div id="hud">
   <div class="title">🌍 Mope Survival</div>
   <div id="coords">x: 0, y: 0</div>
-  <div id="berries">🫐 Berries: 0</div>
-  <div id="shrooms">🍄 Mushrooms: 0</div>
-  <div id="wood">🪵 Wood: 0</div>
-  <div class="subtitle">🐾 Animals</div>
-  <div id="animals">…</div>
+</div>
+<button id="invBtn">🎒</button>
+<div id="invPanel" style="display:none;">
+  <div class="title">🎒 Inventory</div>
+  <div id="invItems">…</div>
 </div>
 <div id="hidden-badge">🤫 Hidden!</div>
 <div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
@@ -2893,12 +2917,17 @@ player.x = (spawnTile.x + 0.5) * TILE;
 player.y = (spawnTile.y + 0.5) * TILE;
 var cam = { x: 0, y: 0 };
 var coordsEl = document.getElementById('coords');
-var berriesEl = document.getElementById('berries');
 var hiddenEl = document.getElementById('hidden-badge');
-var shroomsEl = document.getElementById('shrooms');
-var woodEl = document.getElementById('wood');
-var animalsEl = document.getElementById('animals');
-var animalCountT = 99; // refresh the animal counts every 15s (starts high so it fills in on the first frame)
+var invPanel = document.getElementById('invPanel');
+var invItems = document.getElementById('invItems');
+// Backpack inventory: shows what you're carrying, refreshed on every pickup
+function refreshInv() {
+  invItems.innerHTML = '🫐 Berries: ' + score + '<br>🍄 Mushrooms: ' + mushScore + '<br>🪵 Wood: ' + woodScore;
+}
+document.getElementById('invBtn').addEventListener('click', function () {
+  refreshInv();
+  invPanel.style.display = invPanel.style.display === 'none' ? 'block' : 'none';
+});
 
 function treeScale(tx, ty) { return 1.8 + hash2(tx, ty, 41) * 0.4; } // 1.8 - 2.2x
 function acaciaScale(tx, ty) { return 2.0 + hash2(tx, ty, 701) * 0.6; } // 2.0 - 2.6x, wide flat umbrellas
@@ -4885,39 +4914,6 @@ function steerReady(e) {
 // Squared stray distance from a home anchor.
 function stray2(e, hx, hy) { var dx = e.x - hx, dy = e.y - hy; return dx * dx + dy * dy; }
 
-// Rebuild the animal-count list in the side bar (called every 15s)
-function updateAnimalCounts() {
-  var rows = [
-    ['🐰 Rabbits', bunnies.length],
-    ['🐇 Jackrabbits', jacks.length],
-    ['🦆 Ducks', ducks.length],
-    ['🐟 Fish', fishes.length],
-    ['🦔 Hedgehogs', hedgehogs.length],
-    ['🐗 Warthogs', warthogs.length],
-    ['🐺 Hyenas', hyenas.length],
-    ['🐻 Bears', grizzlies.length],
-    ['🐾 Armadillos', armadillos.length],
-    ['🦎 Lizards', lizards.length],
-    ['🕷️ Tarantulas', tarantulas.length],
-    ['🐜 Ants', ants.length],
-    ['🐸 Frogs', frogs.length],
-    ['🐊 Gators', gators.length],
-    ['🐍 Snakes', snakes.length],
-    ['🦅 Eagles', eagles.length],
-    ['🪶 Hawks', hawks.length],
-    ['🦉 Snowy owls', snowyOwls.length],
-    ['🦅 Vultures', vultures.length],
-    ['🕊️ Seagulls', seagulls.length],
-    ['🐢 Sea turtles', seaTurtles.length],
-    ['🐬 Dolphins', dolphins.length],
-    ['🦀 Crabs', crabHoles.length],
-    ['🐉 Dragon', dragon ? 1 : 0],
-    ['🐦 Secretary bird', secretary ? 1 : 0]
-  ];
-  var html = '';
-  for (var i = 0; i < rows.length; i++) html += rows[i][0] + ': ' + rows[i][1] + '<br>';
-  animalsEl.innerHTML = html;
-}
 var TREE_HITS = 20, TREE_REGROW = 180; // hits to fell a tree, seconds for its stump to regrow
 // Fell a trunk into a stump (stays solid like a natural stump, regrows in 3 minutes)
 function fellTree(ti) {
@@ -4970,7 +4966,7 @@ function tryHarvestWood() {
   }
   if (best === -1) return;
   woodScore++;
-  woodEl.textContent = '🪵 Wood: ' + woodScore;
+  refreshInv();
   if (++treeHits[best] >= TREE_HITS) fellTree(best);
 }
 function update(dt) {
@@ -5079,7 +5075,7 @@ function update(dt) {
           if (!berryN[ei]) berryT[ei] = 0;
           score++;
           eatCd = 0.25;
-          berriesEl.textContent = '🫐 Berries: ' + score;
+          refreshInv();
           break;
         }
       }
@@ -5100,7 +5096,7 @@ function update(dt) {
             if (!mushN[mi]) mushT[mi] = 0;
             mushScore++;
             eatCd = 0.25;
-            shroomsEl.textContent = '🍄 Mushrooms: ' + mushScore;
+            refreshInv();
             break;
           }
         }
@@ -8507,8 +8503,6 @@ function resolveAnimalPairs() {
     swingCd -= dt;
     if (mouseHeld && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); }
   }
-  animalCountT += dt;
-  if (animalCountT >= 15) { animalCountT = 0; updateAnimalCounts(); }
 }
 
 // ---------- Drawing ----------
