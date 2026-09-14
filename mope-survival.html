@@ -351,7 +351,7 @@ function inBounds(x, y) { return x >= 0 && y >= 0 && x < W && y < H; }
 // savanna, snow and swamp uncommon; rock flats rare; volcanoes very rare.
 var CHUNK = 16, MOAT = 10;
 var OUT_DEEP = 0.07; // ocean where elev < WATER_LEVEL - this
-var R_DESERT = 0.66, R_SAV = 0.67, R_SNOW = 0.65, R_SWAMP = 0.69, R_ROCK = 0.76;
+var R_ROCK = 0.76; // rock-flat rarity (other biomes follow climate in baseBiome)
 var VCELL = 160, VOLC_P = 0.3; // volcano cell size + per-cell chance
 var chunks = new Map(); // "cx,cy" -> {biome,elev,snow,ice,mud,sav,des,swp,volc,lava,rock}
 function inRegion(tx, ty) { return tx >= 0 && ty >= 0 && tx < W && ty < H; }
@@ -360,12 +360,17 @@ function moatOcean(tx, ty) {
   return tx >= -MOAT && ty >= -MOAT && tx < W + MOAT && ty < H + MOAT;
 }
 function outCont(tx, ty) {
-  return fbm(tx * 0.006 + 11.7, ty * 0.006 + 11.7, 4) + 0.12 * fbm(tx * 0.03 + 77.1, ty * 0.03 + 77.1, 2);
+  return fbm(tx * 0.006 + 11.7, ty * 0.006 + 11.7, 4) + 0.12 * fbm(tx * 0.03 + 77.1, ty * 0.03 + 77.1, 2) + 0.06 * (fbm(tx * 0.045 + 55.5, ty * 0.045 + 55.5, 2) - 0.5) * 2;
 }
-function desertM(tx, ty) { return fbm(tx * 0.008 + 300.3, ty * 0.008 + 300.3, 3) > R_DESERT; }
-function savM(tx, ty) { return fbm(tx * 0.005 + 800.8, ty * 0.005 + 800.8, 3) > R_SAV; }
-function snowM(tx, ty) { return fbm(tx * 0.004 + 500.5, ty * 0.004 + 500.5, 3) > R_SNOW; }
-function swampM(tx, ty) { return fbm(tx * 0.009 + 900.9, ty * 0.009 + 900.9, 3) > R_SWAMP; }
+// Climate: hot at the equator (y = 0), freezing far north/south, plus
+// weather noise so bands wobble naturally instead of striping the map.
+function tempAt(tx, ty) {
+  var lat = 0.62 - Math.abs(ty) / 2600;
+  if (lat < 0) lat = 0; else if (lat > 1) lat = 1;
+  return lat + (fbm(tx * 0.004 + 900.1, ty * 0.004 + 900.1, 3) - 0.5) * 0.45;
+}
+function dryAt(tx, ty) { return fbm(tx * 0.006 + 300.3, ty * 0.006 + 300.3, 3); }
+function wetAt(tx, ty) { return fbm(tx * 0.009 + 901.9, ty * 0.009 + 901.9, 3); }
 function rockM(tx, ty) { return fbm(tx * 0.007 + 700.7, ty * 0.007 + 700.7, 3) > R_ROCK; }
 // Active volcano center for a 160px cell, or null (very rare, deterministic)
 function volcanoCell(vx, vy) {
@@ -375,14 +380,16 @@ function volcanoCell(vx, vy) {
     y: vy * VCELL + 20 + hash2(vx, vy, seed + 912) * (VCELL - 40)
   };
 }
-// Volcano cone covering a tile, or null (checks the 3x3 cells that can reach it)
+// Volcano cone covering a tile, or null (checks the 3x3 cells that can reach it).
+// The cone wobbles like real terrain instead of a perfect ellipse.
 function volcanoAtOut(tx, ty) {
   var bx = Math.floor(tx / VCELL), by = Math.floor(ty / VCELL), best = null;
   for (var oy = -1; oy <= 1; oy++) {
     for (var ox = -1; ox <= 1; ox++) {
       var vc = volcanoCell(bx + ox, by + oy);
       if (!vc) continue;
-      var dx = (tx - vc.x) / 20, dy = (ty - vc.y) / 18;
+      var wob = (fbm(tx * 0.05 + 1100.7, ty * 0.05 + 1100.7, 2) - 0.5) * 8;
+      var dx = (tx - vc.x) / (20 + wob), dy = (ty - vc.y) / (18 + wob);
       if (dx * dx + dy * dy < 1) { best = vc; }
     }
   }
@@ -397,16 +404,20 @@ function baseBiome(tx, ty) {
   if (e < WATER_LEVEL) return { b: WATER, e: e };
   var vc = volcanoAtOut(tx, ty);
   if (vc) return { b: GRASS, e: e, volc: 1, vcx: vc.x, vcy: vc.y };
-  if (rockM(tx, ty)) return { b: GRASS, e: e, rock: 1 };
-  var sn = snowM(tx, ty);
-  if (desertM(tx, ty) && !sn) return { b: SAND, e: e, des: 1 };
-  if (!sn && swampM(tx, ty)) {
+  if (rockM(tx, ty) || e > 0.80) return { b: GRASS, e: e, rock: 1 }; // rock flats + mountain peaks
+  var temp = tempAt(tx, ty);
+  function jit(s) { return (hash2(tx, ty, seed + s) - 0.5) * 0.12; }
+  var snowy = temp + jit(871) < 0.36 || e > 0.86; // cold lands + high peaks
+  if (!snowy && temp + jit(872) > 0.62 && dryAt(tx, ty) + jit(873) > 0.56) {
+    return { b: SAND, e: e, des: 1 }; // hot dry desert
+  }
+  if (!snowy && e < WATER_LEVEL + 0.05 && temp > 0.30 && wetAt(tx, ty) + jit(874) > 0.60) {
     var swd = fbm(tx * 0.05 + 450.4, ty * 0.05 + 450.4, 3) * 0.75 + hash2(tx, ty, seed + 851) * 0.25;
     if (swd > 0.52) return { b: WATER, e: WATER_LEVEL - 0.06, swp: 1 };
-    return { b: GRASS, e: e, swp: 1 };
+    return { b: GRASS, e: e, swp: 1 }; // soggy lowland hummocks
   }
-  if (sn) return { b: GRASS, e: e, snow: 1 };
-  if (savM(tx, ty)) return { b: GRASS, e: e, sav: 1 };
+  if (snowy) return { b: GRASS, e: e, snow: 1 };
+  if (temp + jit(875) > 0.52) return { b: GRASS, e: e, sav: 1 };
   return { b: GRASS, e: e };
 }
 function getChunk(cx, cy) {
@@ -462,7 +473,8 @@ function genChunk(cx, cy) {
       if (bb.rock) sc_rock[si] = 1;
       // crater pool + rim vents (same shapes as the region volcano)
       if (bb.volc && bb.b === GRASS) {
-        var cdx = (tx - bb.vcx) / 5.5, cdy = (ty - bb.vcy) / 5;
+        var cwob = (hash2(tx, ty, seed + 889) - 0.5) * 2;
+        var cdx = (tx - bb.vcx) / (5.5 + cwob), cdy = (ty - bb.vcy) / (5 + cwob);
         if (cdx * cdx + cdy * cdy < 1) { sc_b[si] = WATER; sc_lava[si] = 1; }
         else if (hash2(tx, ty, seed + 882) < 0.12) { sc_b[si] = WATER; sc_lava[si] = 1; }
       }
@@ -544,9 +556,10 @@ function genChunk(cx, cy) {
       var si2 = sgi(ix + 1, iy + 1), ci2 = iy * CHUNK + ix;
       var b2 = sc_b[si2];
       if (!sc_lava[si2] && b2 === GRASS && !sc_volc[si2] && !sc_des[si2] && !sc_snow[si2] && !sc_rock[si2] && !sc_swp[si2]) {
-        var shore = false; // beach sand hugs the ocean
-        for (var sy3 = -2; sy3 <= 2 && !shore; sy3++) {
-          for (var sx3 = -2; sx3 <= 2; sx3++) {
+        var shore = false; // beach sand hugs the ocean (width varies a tile or two)
+        var reach = hash2(cx * CHUNK + ix, cy * CHUNK + iy, seed + 873) < 0.3 ? 3 : 2;
+        for (var sy3 = -reach; sy3 <= reach && !shore; sy3++) {
+          for (var sx3 = -reach; sx3 <= reach; sx3++) {
             if (!sx3 && !sy3) continue;
             if (sc_b[sgi(ix + 1 + sx3, iy + 1 + sy3)] === OCEAN) { shore = true; break; }
           }
@@ -3026,6 +3039,7 @@ function minimapRGB(tx, ty) {
     mRk = q.c.rock[q.i]; mVl = q.c.volc[q.i]; mDs = q.c.des[q.i];
     mSn = q.c.snow[q.i]; mSv = q.c.sav[q.i]; mBg = 0;
   }
+  var j = inRegion(tx, ty) ? ty * W + tx : -1; // vegetation only grows back home
   var r = 60, g = 179, bl = 113;
   if (b === OCEAN) { r = 20; g = 60; bl = 140; }
   else if (mLv) { r = 230; g = 90; bl = 20; }
@@ -3036,6 +3050,29 @@ function minimapRGB(tx, ty) {
     else if (tIce(tx, ty)) { r = 207; g = 227; bl = 242; }
     else { r = 52; g = 152; bl = 219; }
   }
+  else if (j >= 0 && palms[j]) { r = 34; g = 139; bl = 70; }
+  else if (j >= 0 && cactus[j]) { r = 46; g = 110; bl = 70; }
+  else if (j >= 0 && boulder[j]) { r = 110; g = 106; bl = 98; }
+  else if (j >= 0 && deadTree[j]) { r = 150; g = 140; bl = 125; }
+  else if (b === SAND) {
+    if (mVl) { r = 70; g = 62; bl = 56; }
+    else if (mDs) { r = 235; g = 200; bl = 118; }
+    else { r = 244; g = 226; bl = 133; }
+  }
+  else if (j >= 0 && acacias[j]) { r = 110; g = 118; bl = 58; }
+  else if (j >= 0 && pines[j]) { r = 27; g = 94; bl = 78; }
+  else if (j >= 0 && trees[j]) { r = 20; g = 90; bl = 40; }
+  else if (j >= 0 && stumps[j]) {
+    if (stumpKind[j] === 2) { r = 105; g = 100; bl = 85; }
+    else if (stumpKind[j] === 3) { r = 155; g = 130; bl = 88; }
+    else { r = 122; g = 90; bl = 60; }
+  }
+  else if (j >= 0 && deadB[j]) { r = 150; g = 128; bl = 92; }
+  else if (mVl) { r = 70; g = 62; bl = 56; }
+  else if (mSw) { r = 56; g = 132; bl = 86; }
+  else if (mRk) { r = 168; g = 162; bl = 150; }
+  else if (mSv) { r = 205; g = 185; bl = 120; }
+  else if (mSn) { r = 232; g = 240; bl = 248; }
   return [r, g, bl];
 }
 function refreshMinimap() {
@@ -3117,6 +3154,7 @@ canvas.addEventListener('touchcancel', joyEnd);
 // world coordinates in drawPlayer. Stays negative until the first pointer
 // input, while the player faces the walk direction instead.
 var mouseSX = -1, mouseSY = -1;
+var lookX = 1, lookY = 0; // where the player looks (for the minimap arrow)
 window.addEventListener('mousemove', function (e) { mouseSX = e.clientX; mouseSY = e.clientY; });
 var mouseHeld = false, swingCd = 0; // held mouse re-swings 0.3s after each hit ends
 // Clicking down (re)starts the hit animation: player, hit1, hit2, hit3,
@@ -11644,6 +11682,7 @@ function drawPlayer(sx, sy, t) {
       ldx = mdx / mlen; ldy = mdy / mlen;
     }
   }
+  lookX = ldx; lookY = ldy; // minimap arrow follows the eyes
   if (typeof playerImgOk !== 'undefined' && playerImgOk) {
     // Hit animation frame when swinging (falls back to player.svg per frame).
     // Every frame shares one scale and one body anchor, so the body stays
@@ -12567,8 +12606,13 @@ function render(t, rdt) {
   ctx.lineWidth = 2;
   ctx.strokeRect(mx - 5, my - 5, mm + 10, mm + 10);
   ctx.fillStyle = '#fff';
+  var pa = Math.atan2(lookY, lookX); // you face your look way on the map
+  var pcx = mx + mm / 2, pcy = my + mm / 2;
   ctx.beginPath();
-  ctx.arc(mx + mm / 2, my + mm / 2, 3.5, 0, 7);
+  ctx.moveTo(pcx + Math.cos(pa) * 6, pcy + Math.sin(pa) * 6);
+  ctx.lineTo(pcx + Math.cos(pa + 2.5) * 5, pcy + Math.sin(pa + 2.5) * 5);
+  ctx.lineTo(pcx + Math.cos(pa - 2.5) * 5, pcy + Math.sin(pa - 2.5) * 5);
+  ctx.closePath();
   ctx.fill();
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 1;
