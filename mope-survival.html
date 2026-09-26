@@ -36,6 +36,39 @@
     pointer-events: none;
   }
   #hud .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
+  #hpbar {
+    margin-top: 6px;
+    width: 130px;
+    height: 10px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    overflow: hidden;
+  }
+  #hpfill { width: 100%; height: 100%; background: #e53935; }
+  #deadScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 8, 16, 0.72);
+    color: #fff;
+    text-align: center;
+  }
+  #deadPanel .title { font-size: 2rem; font-weight: bold; color: #ff5252; }
+  #deadPanel .hint { font-size: 0.95rem; opacity: 0.9; margin: 10px 0 16px; }
+  #respawnBtn {
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: #0b1020;
+    background: #ffd700;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 44px;
+    cursor: pointer;
+  }
   #invBtn {
     position: fixed;
     top: 186px;
@@ -49,19 +82,116 @@
     background: rgba(13, 19, 27, 0.93);
     cursor: pointer;
   }
-  #invPanel {
+  #blueprintBtn {
     position: fixed;
     top: 250px;
     right: 12px;
     z-index: 10;
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
     background: rgba(13, 19, 27, 0.93);
-    color: #fff;
-    padding: 10px 14px;
-    border-radius: 10px;
-    font-size: 0.9rem;
-    line-height: 1.5;
+    cursor: pointer;
+    padding: 6px;
   }
-  #invPanel .title { font-weight: bold; color: #ffd700; font-size: 1rem; }
+  #blueprintBtn img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  #blueprintBtn:active { transform: scale(0.92); }
+  #invPanel {
+    background: rgba(13, 19, 27, 0.97);
+    padding: 26px 30px;
+    border-radius: 16px;
+    border: 3px solid rgba(255, 215, 0, 0.5);
+    box-shadow: 0 10px 60px rgba(0, 0, 0, 0.7);
+    max-width: 92vw;
+  }
+  #invPanel .title { font-weight: bold; color: #ffd700; font-size: 1.5rem; margin-bottom: 14px; text-align: center; }
+  #invPanel .hint { color: #fff; opacity: 0.75; font-size: 0.85rem; margin-top: 14px; text-align: center; }
+  #invScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+  }
+  #invGrid { display: grid; grid-template-columns: repeat(9, 62px); gap: 8px; }
+  #invHot { display: grid; grid-template-columns: repeat(9, 62px); gap: 8px; margin-top: 40px; }
+  #invGrid .slot, #invHot .slot {
+    position: relative;
+    width: 62px;
+    height: 62px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #invGrid .slot:hover, #invHot .slot:hover { border-color: rgba(255, 215, 0, 0.7); }
+  #invGrid .slot.sel, #invHot .slot.sel { border-color: #ffd700; box-shadow: 0 0 10px rgba(255, 215, 0, 0.6); }
+  #invGrid .emoji, #invHot .emoji { font-size: 2rem; line-height: 1; pointer-events: none; }
+  #invGrid .emoji, #invHot .emoji, #hotbar .emoji { display: flex; align-items: center; justify-content: center; width: 80%; height: 80%; }
+  #invGrid .emoji img, #invHot .emoji img, #hotbar .emoji img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+  #heldItem img { width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
+  .craftBtn img.mini { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: -0.2em; }
+  #invGrid .count, #invHot .count {
+    position: absolute;
+    right: 6px;
+    bottom: 4px;
+    font-size: 1rem;
+    font-weight: bold;
+    color: #ffd700;
+    text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
+    pointer-events: none;
+  }
+  .craftRow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 12px;
+    color: #fff;
+    font-size: 1.3rem;
+  }
+  .craftRow .arrow { opacity: 0.7; }
+  .craftBtn {
+    font-size: 1.3rem;
+    background: rgba(255, 215, 0, 0.15);
+    border: 2px solid rgba(255, 215, 0, 0.7);
+    border-radius: 10px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .craftBtn.poor { opacity: 0.35; }
+  #heldItem {
+    position: fixed;
+    z-index: 40;
+    pointer-events: none;
+    font-size: 2rem;
+    line-height: 1;
+    text-shadow: 2px 2px 0 #000;
+  }
+  #heldItem .hcount {
+    font-size: 1rem;
+    font-weight: bold;
+    color: #ffd700;
+    text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
+  }
   #hidden-badge {
     display: none;
     position: fixed;
@@ -77,7 +207,7 @@
   }
   #help {
     position: fixed;
-    bottom: 12px;
+    bottom: 76px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
@@ -87,6 +217,42 @@
     border-radius: 10px;
     font-size: 0.85rem;
     white-space: nowrap;
+    pointer-events: none;
+  }
+  #hotbar {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    gap: 6px;
+  }
+  #hotbar .hslot {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: rgba(13, 19, 27, 0.85);
+    border: 2px solid rgba(255, 255, 255, 0.22);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #hotbar .hslot.sel { border-color: #ffd700; box-shadow: 0 0 10px rgba(255, 215, 0, 0.6); }
+  #hotbar .emoji { font-size: 1.4rem; line-height: 1; pointer-events: none; }
+  #hotbar .count {
+    position: absolute;
+    right: 3px;
+    bottom: 1px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    color: #ffd700;
+    text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
     pointer-events: none;
   }
   #menu {
@@ -137,14 +303,45 @@
 <div id="hud">
   <div class="title">🌍 Mope Survival</div>
   <div id="coords">x: 0, y: 0</div>
+  <div id="hpbar"><div id="hpfill"></div></div>
+</div>
+<div id="deadScreen" style="display:none;">
+  <div id="deadPanel">
+    <div class="title">💀 You died!</div>
+    <div class="hint">The wilds got you. Same stuff, fresh start.</div>
+    <button id="respawnBtn">↻ Respawn</button>
+  </div>
 </div>
 <button id="invBtn">🎒</button>
-<div id="invPanel" style="display:none;">
-  <div class="title">🎒 Inventory</div>
-  <div id="invItems">…</div>
+<button id="blueprintBtn"><img src="rolledBlueprint.png" alt="blueprints"></button>
+<div id="invScreen" style="display:none;">
+  <div id="invPanel">
+    <div class="title">🎒 Inventory</div>
+    <div id="invGrid"></div>
+    <div id="invHot"></div>
+    <div class="craftRow">
+      <span class="ing">2 🪵</span><span class="arrow">➜</span>
+      <button id="craftSticksBtn" class="craftBtn">4 <img class="mini" src="stick.svg" alt="sticks"></button>
+    </div>
+    <div class="craftRow">
+      <span class="ing">3 🪵 + 2 <img class="mini" src="stick.svg" alt="sticks"></span><span class="arrow">➜</span>
+      <button id="craftAxeBtn" class="craftBtn">1 🪓</button>
+    </div>
+    <div class="craftRow">
+      <span class="ing">2 🪵 + 1 <img class="mini" src="stick.svg" alt="stick"></span><span class="arrow">➜</span>
+      <button id="craftSwordBtn" class="craftBtn">1 🗡️</button>
+    </div>
+    <div class="craftRow">
+      <span class="ing">3 🪵 + 2 <img class="mini" src="stick.svg" alt="sticks"></span><span class="arrow">➜</span>
+      <button id="craftPickBtn" class="craftBtn">1 ⛏️</button>
+    </div>
+    <div class="hint">Click: pick up / place • Right-click: place one / take half • E to close</div>
+  </div>
 </div>
+<div id="heldItem" style="display:none;"></div>
 <div id="hidden-badge">🤫 Hidden!</div>
-<div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Touch: drag to walk</div>
+<div id="help">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Click to hit &nbsp;•&nbsp; E bag &nbsp;•&nbsp; F eat &nbsp;•&nbsp; Touch: drag to walk</div>
+<div id="hotbar"></div>
 <div id="menu">
   <div class="title">🌍 Mope Survival</div>
   <div class="hint">WASD / Arrows to walk &nbsp;•&nbsp; Shift to run &nbsp;•&nbsp; Mouse to look &nbsp;•&nbsp; Click to hit<br>Touch: drag to walk</div>
@@ -251,13 +448,129 @@ var noBush = new Uint8Array(W * H); // keep bushes clear of logs/stumps
 var open = new Uint8Array(W * H); // open field: grass with no trees nearby
 var mushN = new Uint8Array(W * H); // mushrooms on a stump (0-3)
 var mushT = new Float32Array(W * H); // mushroom regrow timer
-var mushScore = 0;
-var woodScore = 0;
+// Backpack slots: {kind: null|'berry'|'shroom'|'wood', n} (Minecraft-style stacks)
+var INV_COLS = 9, INV_ROWS = 3, HOT_OFF = INV_COLS * INV_ROWS;
+var INV_SIZE = HOT_OFF + INV_COLS, STACK_MAX = 64;
+var KIND_EMOJI = { berry: '🫐', shroom: '🍄', wood: '🪵', stick: '🥢', axe: '🪓', sword: '🗡️', pickaxe: '⛏️', stone: '🪨' };
+var SLOT_ART = { stick: 'stick.svg' }; // kinds drawn from art files instead of emoji
+var invSlots = [];
+for (var ii0 = 0; ii0 < INV_SIZE; ii0++) invSlots.push({ kind: null, n: 0 });
+var heldStack = { kind: null, n: 0 }; // stack on the cursor
+var invOpen = false;
+function invCount(kind) {
+  var t = 0;
+  for (var i = 0; i < INV_SIZE; i++) if (invSlots[i].kind === kind) t += invSlots[i].n;
+  if (heldStack.kind === kind) t += heldStack.n;
+  return t;
+}
+function invAdd(kind, n) {
+  var i, s, put;
+  for (i = 0; i < INV_SIZE && n > 0; i++) {
+    s = invSlots[i];
+    if (s.kind === kind && s.n < STACK_MAX) {
+      put = Math.min(STACK_MAX - s.n, n);
+      s.n += put; n -= put;
+    }
+  }
+  for (i = 0; i < INV_SIZE && n > 0; i++) {
+    s = invSlots[i];
+    if (!s.kind) {
+      put = Math.min(STACK_MAX, n);
+      s.kind = kind; s.n = put; n -= put;
+    }
+  }
+  refreshInv();
+}
+// Click a slot: pick up / place / swap / merge, right = place one / take half
+function slotClick(i, btn) {
+  var s = invSlots[i];
+  if (btn === 2) {
+    if (heldStack.kind) {
+      if (!s.kind || (s.kind === heldStack.kind && s.n < STACK_MAX)) {
+        s.kind = heldStack.kind; s.n++;
+        heldStack.n--;
+        if (heldStack.n <= 0) heldStack.kind = null;
+      }
+    } else if (s.kind) {
+      var half = Math.ceil(s.n / 2);
+      heldStack.kind = s.kind; heldStack.n = half;
+      s.n -= half;
+      if (s.n <= 0) s.kind = null;
+    }
+  } else {
+    if (!heldStack.kind) {
+      heldStack.kind = s.kind; heldStack.n = s.n;
+      s.kind = null; s.n = 0;
+    } else if (!s.kind) {
+      s.kind = heldStack.kind; s.n = heldStack.n;
+      heldStack.kind = null; heldStack.n = 0;
+    } else if (s.kind === heldStack.kind) {
+      var room = STACK_MAX - s.n, mv = Math.min(room, heldStack.n);
+      s.n += mv; heldStack.n -= mv;
+      if (heldStack.n <= 0) heldStack.kind = null;
+    } else {
+      var tk = s.kind, tn = s.n;
+      s.kind = heldStack.kind; s.n = heldStack.n;
+      heldStack.kind = tk; heldStack.n = tn;
+    }
+  }
+  refreshInv();
+}
+// Take n of a kind out of the slots (and cursor), returns leftover
+function invRemove(kind, n) {
+  for (var i = 0; i < INV_SIZE && n > 0; i++) {
+    var s = invSlots[i];
+    if (s.kind === kind) {
+      var take = Math.min(s.n, n);
+      s.n -= take; n -= take;
+      if (s.n <= 0) s.kind = null;
+    }
+  }
+  if (n > 0 && heldStack.kind === kind) {
+    var take2 = Math.min(heldStack.n, n);
+    heldStack.n -= take2; n -= take2;
+    if (heldStack.n <= 0) heldStack.kind = null;
+  }
+  return n;
+}
+// Recipe: 2 wood -> 4 sticks (one batch per click)
+function craftSticks() {
+  if (invCount('wood') < 2) return false;
+  invRemove('wood', 2);
+  invAdd('stick', 4);
+  refreshInv();
+  return true;
+}
+// Tool recipes, crafted right in the backpack (one batch per click)
+function craftTool(kind, woodNeed, stickNeed) {
+  if (invCount('wood') < woodNeed || invCount('stick') < stickNeed) return false;
+  invRemove('wood', woodNeed);
+  invRemove('stick', stickNeed);
+  invAdd(kind, 1);
+  refreshInv();
+  refreshToolBtns();
+  return true;
+}
+function craftAxe() { return craftTool('axe', 3, 2); }
+function craftSword() { return craftTool('sword', 2, 1); }
+function craftPickaxe() { return craftTool('pickaxe', 3, 2); }
+function refreshCraftBtn() {
+  var b = document.getElementById('craftSticksBtn');
+  if (b) b.className = 'craftBtn' + (invCount('wood') >= 2 ? '' : ' poor');
+}
+function refreshToolBtns() {
+  var ax = document.getElementById('craftAxeBtn');
+  if (ax) ax.className = 'craftBtn' + ((invCount('wood') >= 3 && invCount('stick') >= 2) ? '' : ' poor');
+  var sw = document.getElementById('craftSwordBtn');
+  if (sw) sw.className = 'craftBtn' + ((invCount('wood') >= 2 && invCount('stick') >= 1) ? '' : ' poor');
+  var pk = document.getElementById('craftPickBtn');
+  if (pk) pk.className = 'craftBtn' + ((invCount('wood') >= 3 && invCount('stick') >= 2) ? '' : ' poor');
+}
 var treeHits = new Uint8Array(W * H); // hits taken per trunk (20 fells it)
 var stumpWas = new Uint8Array(W * H); // felled stump's tree: 1 tree 2 pine 3 palm 4 acacia (0 = natural stump)
 var stumpRegT = new Float32Array(W * H); // seconds until a felled stump regrows (0 = never)
 var seed = 20260906;
-var score = 0, eatCd = 0, splashT = 0, duckCheckT = 0, bunCheckT = 0, fishCheckT = 0, hedgeCheckT = 0;
+var eatCd = 0, splashT = 0, duckCheckT = 0, bunCheckT = 0, fishCheckT = 0, hedgeCheckT = 0;
 var MIN_POND_FISH = 35; // ponds + lake, always at least this many
 var MIN_SEA_FISH = 67; // ocean, always at least this many
 var START_BUNNIES = 30; // rabbits alive when the game starts
@@ -2897,7 +3210,7 @@ window.addEventListener('mousedown', function (e) {
   mouseSX = e.clientX; mouseSY = e.clientY;
   mouseHeld = true;
   // Clicks obey the 0.3s cooldown too: only start a swing when idle and cooled down
-  if (swingFrame < 0 && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); }
+  if (swingFrame < 0 && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); tryMineStone(); tryHitAnimal(); }
 });
 window.addEventListener('mouseup', function () { mouseHeld = false; });
 
@@ -2918,15 +3231,139 @@ player.y = (spawnTile.y + 0.5) * TILE;
 var cam = { x: 0, y: 0 };
 var coordsEl = document.getElementById('coords');
 var hiddenEl = document.getElementById('hidden-badge');
-var invPanel = document.getElementById('invPanel');
-var invItems = document.getElementById('invItems');
+var invScreen = document.getElementById('invScreen');
+var invGrid = document.getElementById('invGrid');
+var invCells = []; // 27 storage cells (slots 0-26)
+var invHotCells = []; // panel hotbar row (slots 27-35)
+function buildCells(containerId, cellArray, start, count, cls, clickFn, rightFn) {
+  var container = document.getElementById(containerId);
+  for (var bi2 = 0; bi2 < count; bi2++) {
+    (function (si) {
+      var cell = document.createElement('div');
+      cell.className = cls;
+      var em = document.createElement('span');
+      em.className = 'emoji';
+      var ct = document.createElement('span');
+      ct.className = 'count';
+      cell.appendChild(em);
+      cell.appendChild(ct);
+      cell.addEventListener('click', function () { clickFn(si); });
+      if (rightFn) cell.addEventListener('contextmenu', function (e) { e.preventDefault(); rightFn(si); });
+      container.appendChild(cell);
+      cellArray.push(cell);
+    })(start + bi2);
+  }
+}
+buildCells('invGrid', invCells, 0, HOT_OFF, 'slot', function (si) { slotClick(si, 0); }, function (si) { slotClick(si, 2); });
+buildCells('invHot', invHotCells, HOT_OFF, INV_COLS, 'slot', function (si) { slotClick(si, 0); }, function (si) { slotClick(si, 2); });
+function paintCell(cell, s) {
+  var em = cell.querySelector('.emoji');
+  var art = s.kind ? SLOT_ART[s.kind] : null;
+  if (art) {
+    if (em.getAttribute('data-art') !== art) {
+      em.innerHTML = '<img src="' + art + '" alt="">';
+      em.setAttribute('data-art', art);
+    }
+  } else {
+    if (em.getAttribute('data-art')) { em.innerHTML = ''; em.setAttribute('data-art', ''); }
+    em.textContent = s.kind ? KIND_EMOJI[s.kind] : '';
+  }
+  cell.querySelector('.count').textContent = s.n > 0 ? s.n : '';
+}
 // Backpack inventory: shows what you're carrying, refreshed on every pickup
 function refreshInv() {
-  invItems.innerHTML = '🫐 Berries: ' + score + '<br>🍄 Mushrooms: ' + mushScore + '<br>🪵 Wood: ' + woodScore;
+  for (var ri = 0; ri < HOT_OFF; ri++) paintCell(invCells[ri], invSlots[ri]);
+  renderHot();
+  refreshCraftBtn();
+  var h = document.getElementById('heldItem');
+  if (heldStack.kind) {
+    h.style.display = 'block';
+    var hart = SLOT_ART[heldStack.kind];
+    h.innerHTML = (hart ? '<img src="' + hart + '" alt="">' : KIND_EMOJI[heldStack.kind]) + ' <span class="hcount">' + heldStack.n + '</span>';
+  } else {
+    h.style.display = 'none';
+  }
 }
-document.getElementById('invBtn').addEventListener('click', function () {
+// Hotbar: the same 9 slots, always visible. Click or press 1-9 to select,
+// F eats one berry/mushroom from the selected slot (sugar rush: +25% speed).
+var hotCells = [];
+var hotSel = 0;
+try {
+  var shs = parseInt(localStorage.getItem('mope_hot') || '0', 10);
+  if (shs >= 0 && shs < INV_COLS) hotSel = shs;
+} catch (e4) {}
+(function buildHotbar() {
+  var bar = document.getElementById('hotbar');
+  for (var hi = 0; hi < INV_COLS; hi++) {
+    (function (idx3) {
+      var cell = document.createElement('div');
+      cell.className = 'hslot';
+      var em = document.createElement('span');
+      em.className = 'emoji';
+      var ct = document.createElement('span');
+      ct.className = 'count';
+      cell.appendChild(em);
+      cell.appendChild(ct);
+      cell.addEventListener('click', function () { selectHot(idx3); });
+      bar.appendChild(cell);
+      hotCells.push(cell);
+    })(hi);
+  }
+})();
+function renderHot() {
+  for (var rhi = 0; rhi < INV_COLS; rhi++) {
+    var rs2 = invSlots[HOT_OFF + rhi];
+    paintCell(invHotCells[rhi], rs2);
+    paintCell(hotCells[rhi], rs2);
+    invHotCells[rhi].className = 'slot' + (rhi === hotSel ? ' sel' : '');
+    hotCells[rhi].className = 'hslot' + (rhi === hotSel ? ' sel' : '');
+  }
+}
+function selectHot(i) {
+  hotSel = i;
+  try { localStorage.setItem('mope_hot', String(i)); } catch (e5) {}
+  renderHot();
+}
+var speedBoostT = 0; // sugar rush from eating, seconds left
+function eatSelected() {
+  if (!playing || invOpen) return;
+  var s = invSlots[HOT_OFF + hotSel];
+  if (!s.kind || (s.kind !== 'berry' && s.kind !== 'shroom')) return;
+  s.n--;
+  if (s.n <= 0) s.kind = null;
+  speedBoostT = 5;
   refreshInv();
-  invPanel.style.display = invPanel.style.display === 'none' ? 'block' : 'none';
+}
+window.addEventListener('keydown', function (e) {
+  if (e.key >= '1' && e.key <= '9') {
+    var n = +e.key;
+    if (n >= 1 && n <= INV_COLS) selectHot(n - 1);
+  } else if (e.key === 'f' || e.key === 'F') {
+    eatSelected();
+  }
+});
+refreshInv();
+function toggleInv(force) {
+  invOpen = force !== undefined ? force : !invOpen;
+  invScreen.style.display = invOpen ? 'flex' : 'none';
+  if (invOpen) refreshInv();
+}
+document.getElementById('invBtn').addEventListener('click', function () { toggleInv(); });
+document.getElementById('blueprintBtn').addEventListener('click', function () { /* blueprints go nowhere yet */ });
+document.getElementById('craftSticksBtn').addEventListener('click', function () { craftSticks(); });
+document.getElementById('craftAxeBtn').addEventListener('click', function () { craftAxe(); });
+document.getElementById('craftSwordBtn').addEventListener('click', function () { craftSword(); });
+document.getElementById('craftPickBtn').addEventListener('click', function () { craftPickaxe(); });
+invScreen.addEventListener('click', function (e) {
+  if (e.target === invScreen) toggleInv(false); // clicked outside the panel: close
+});
+window.addEventListener('keydown', function (e) {
+  if ((e.key === 'e' || e.key === 'E') && playing) toggleInv();
+});
+window.addEventListener('mousemove', function (e) {
+  var h = document.getElementById('heldItem');
+  h.style.left = (e.clientX + 16) + 'px';
+  h.style.top = (e.clientY + 16) + 'px';
 });
 
 function treeScale(tx, ty) { return 1.8 + hash2(tx, ty, 41) * 0.4; } // 1.8 - 2.2x
@@ -3065,6 +3502,7 @@ function isInWater(px, py) {
   if (b === OCEAN) return true;
   return b === WATER && !mud[idx(tx, ty)]; // mud flats are not water
 }
+
 function isMud(px, py) {
   var tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
   if (!inBounds(tx, ty)) return false;
@@ -4709,26 +5147,26 @@ function skipAnimal(a, skipCaught) {
   if (skipCaught && a.state === 'caught') return true;
   return false;
 }
-// Every solid land animal: callback(a, bodyRadius, skipCaught, weight).
+// Every solid land animal: callback(a, bodyRadius, skipCaught, weight, kind).
 // Weights are hidden: heavier bodies shove lighter ones aside (plants,
 // rocks and trunks never budge). The player weighs PLAYER_W.
 var PLAYER_W = 20;
 function eachLandAnimal(cb) {
   var i;
-  for (i = 0; i < bunnies.length; i++) cb(bunnies[i], 7, true, 4);
-  for (i = 0; i < jacks.length; i++) cb(jacks[i], 7, false, 5);
-  for (i = 0; i < hedgehogs.length; i++) cb(hedgehogs[i], 6, true, 5);
-  for (i = 0; i < warthogs.length; i++) cb(warthogs[i], 10, false, 35);
-  for (i = 0; i < hyenas.length; i++) cb(hyenas[i], 9, false, 30);
-  for (i = 0; i < armadillos.length; i++) cb(armadillos[i], 7, false, 12);
-  for (i = 0; i < grizzlies.length; i++) cb(grizzlies[i], 13, false, 90);
-  for (i = 0; i < lizards.length; i++) cb(lizards[i], 4, false, 2);
-  for (i = 0; i < tarantulas.length; i++) cb(tarantulas[i], 5, false, 3);
-  for (i = 0; i < ants.length; i++) cb(ants[i], 3, false, 1);
-  for (i = 0; i < frogs.length; i++) cb(frogs[i], 4, false, 2);
-  for (i = 0; i < gators.length; i++) cb(gators[i], 12, false, 25);
-  for (i = 0; i < snakes.length; i++) cb(snakes[i], 4, false, 6);
-  for (i = 0; i < ducks.length; i++) cb(ducks[i], 6, false, 5);
+  for (i = 0; i < bunnies.length; i++) cb(bunnies[i], 7, true, 4, 'bunny');
+  for (i = 0; i < jacks.length; i++) cb(jacks[i], 7, false, 5, 'jack');
+  for (i = 0; i < hedgehogs.length; i++) cb(hedgehogs[i], 6, true, 5, 'hedge');
+  for (i = 0; i < warthogs.length; i++) cb(warthogs[i], 10, false, 35, 'warthog');
+  for (i = 0; i < hyenas.length; i++) cb(hyenas[i], 9, false, 30, 'hyena');
+  for (i = 0; i < armadillos.length; i++) cb(armadillos[i], 7, false, 12, 'dillo');
+  for (i = 0; i < grizzlies.length; i++) cb(grizzlies[i], 13, false, 90, 'grizzly');
+  for (i = 0; i < lizards.length; i++) cb(lizards[i], 4, false, 2, 'lizard');
+  for (i = 0; i < tarantulas.length; i++) cb(tarantulas[i], 5, false, 3, 'tar');
+  for (i = 0; i < ants.length; i++) cb(ants[i], 3, false, 1, 'ant');
+  for (i = 0; i < frogs.length; i++) cb(frogs[i], 4, false, 2, 'frog');
+  for (i = 0; i < gators.length; i++) cb(gators[i], 12, false, 25, 'gator');
+  for (i = 0; i < snakes.length; i++) cb(snakes[i], 4, false, 6, 'snake');
+  for (i = 0; i < ducks.length; i++) cb(ducks[i], 6, false, 5, 'duck');
 }
 // Standing on a hole (crab hole, burrow, lizard hole): animals can't come
 // out of it or duck into it while you're on top.
@@ -4827,6 +5265,162 @@ function resolveTrunks() {
     }
     if (!nudged) break;
   }
+}
+// ---------- Combat: hitting animals, fleeing, retaliation ----------
+// Toughness per kind; small critters flee when hit, big ones fight back.
+var ANIMAL_HP = { bunny: 3, jack: 3, duck: 4, hedge: 5, frog: 3, lizard: 3, ant: 1, snake: 6, dillo: 10, warthog: 12, hyena: 12, gator: 22, grizzly: 30, secretary: 10, tar: 6 };
+var FLEE_KINDS = ['bunny', 'jack', 'duck', 'hedge', 'frog', 'lizard', 'dillo', 'ant'];
+function animalListFor(kind) {
+  if (kind === 'bunny') return bunnies;
+  if (kind === 'jack') return jacks;
+  if (kind === 'duck') return ducks;
+  if (kind === 'hedge') return hedgehogs;
+  if (kind === 'frog') return frogs;
+  if (kind === 'lizard') return lizards;
+  if (kind === 'ant') return ants;
+  if (kind === 'snake') return snakes;
+  if (kind === 'dillo') return armadillos;
+  if (kind === 'hyena') return hyenas;
+  if (kind === 'gator') return gators;
+  if (kind === 'grizzly') return grizzlies;
+  return null;
+}
+function killAnimal(a, kind) {
+  if (kind === 'warthog') { killWarthog(a); return; } // carcass + pack flow
+  var arr = animalListFor(kind);
+  if (!arr) return;
+  var i = arr.indexOf(a);
+  if (i !== -1) arr.splice(i, 1);
+}
+// Scare one: runners bolt using their own legs, armadillos curl up instead
+function panicAnimal(a, kind) {
+  var away = Math.atan2(a.y - player.y, a.x - player.x);
+  if (kind === 'bunny' || kind === 'jack') {
+    a.heading = away; a.state = 'hop'; a.resting = false; a.timer = 1.5 + Math.random() * 1.5;
+  } else if (kind === 'duck') {
+    if (a.chick) { a.tx = a.x + Math.cos(away) * 120; a.ty = a.y + Math.sin(away) * 120; }
+    else { a.heading = away; a.turn = 1 + Math.random(); if (a.state === 'swim') a.timer = Math.max(a.timer, 2); }
+  } else if (kind === 'hedge' || kind === 'frog') {
+    a.heading = away; a.state = 'wander'; a.resting = false; a.timer = 1.5 + Math.random() * 1.5;
+  } else if (kind === 'lizard') {
+    a.heading = away; a.tx = a.x + Math.cos(away) * 80; a.ty = a.y + Math.sin(away) * 80;
+    a.resting = false; a.timer = 1; a.homeward = false;
+  } else if (kind === 'dillo') {
+    a.state = 'curl'; // armored ball beats running
+  } else if (kind === 'ant') {
+    a.heading = away; a.resting = false; a.timer = 1 + Math.random();
+    a.tx = a.x + Math.cos(away) * 60; a.ty = a.y + Math.sin(away) * 60;
+  }
+}
+function damageAnimal(a, kind) {
+  if (a.maxHp === undefined) a.maxHp = a.hp = ANIMAL_HP[kind] || 5;
+  var dmg = (invSlots[HOT_OFF + hotSel].kind === 'sword') ? 2 : 1;
+  if (kind === 'secretary' && a.hp <= 1) { /* the one bird never dies, but it remembers */ }
+  else a.hp -= dmg;
+  if (a.hp <= 0) { killAnimal(a, kind); return; }
+  if (FLEE_KINDS.indexOf(kind) !== -1) panicAnimal(a, kind);
+  else a.aggroT = 6; // fighters come for you
+}
+// Swing at the nearest ground animal you're facing (fists 1, sword 2)
+function tryHitAnimal() {
+  var lk = playerLook();
+  var best = null, bkind = null, bd = 52 * 52;
+  eachLandAnimal(function (a, rad, skipCaught, w, kind) {
+    if (skipAnimal(a, skipCaught)) return;
+    if (!kind || a.state === 'caught' || a.state === 'snatched' || a.state === 'dying') return;
+    var dx = a.x - player.x, dy = a.y - player.y;
+    var d2 = dx * dx + dy * dy;
+    if (d2 > bd) return;
+    var d = Math.sqrt(d2) || 1;
+    if ((dx / d) * lk.x + (dy / d) * lk.y < 0.3) return;
+    bd = d2; best = a; bkind = kind;
+  });
+  if (!best) { // out crabs duck home instead of taking damage
+    for (var c = 0; c < crabHoles.length; c++) {
+      var ch = crabHoles[c];
+      if (ch.state !== 'out') continue;
+      var cdx = ch.cx - player.x, cdy = ch.cy - player.y;
+      var cd2 = cdx * cdx + cdy * cdy;
+      if (cd2 > bd) continue;
+      var cd = Math.sqrt(cd2) || 1;
+      if ((cdx / cd) * lk.x + (cdy / cd) * lk.y < 0.3) continue;
+      ch.state = 'return';
+      return;
+    }
+  }
+  if (!best && secretary && !skipAnimal(secretary, false) && secretary.state !== 'dying') {
+    var sdx = secretary.x - player.x, sdy = secretary.y - player.y;
+    var sd2 = sdx * sdx + sdy * sdy;
+    if (sd2 <= bd) {
+      var sd = Math.sqrt(sd2) || 1;
+      if ((sdx / sd) * lk.x + (sdy / sd) * lk.y >= 0.3) { damageAnimal(secretary, 'secretary'); return; }
+    }
+  }
+  if (!best) return;
+  damageAnimal(best, bkind);
+}
+// Chase the player and bite: shared by every animal that fights back
+function aggroMove(e, dt, range, dmg, cd, moveFn) {
+  if (!(e.aggroT > 0) || playerHp <= 0) return;
+  e.aggroT -= dt;
+  var dx = player.x - e.x, dy = player.y - e.y;
+  var d = Math.hypot(dx, dy);
+  if (d > 340) { e.aggroT = 0; return; }
+  e.heading = Math.atan2(dy, dx);
+  moveFn();
+  e.biteCd = (e.biteCd || 0) - dt;
+  if (d < range && e.biteCd <= 0) { damagePlayer(dmg); e.biteCd = cd; }
+}
+// Draw a health bar over every hurt animal
+function drawHealthBars() {
+  eachLandAnimal(function (a, rad, skipCaught, w, kind) {
+    if (skipAnimal(a, skipCaught)) return;
+    if (a.maxHp === undefined || a.hp >= a.maxHp || a.hp <= 0) return;
+    var sc = a.sc || 1;
+    var wdt = Math.max(18, 20 * sc);
+    var bx = a.x - wdt / 2, by = a.y - (12 * sc + 12);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(bx - 1, by - 1, wdt + 2, 6);
+    var f = Math.max(0, a.hp / a.maxHp);
+    ctx.fillStyle = f > 0.5 ? '#4caf50' : (f > 0.25 ? '#ff9800' : '#f44336');
+    ctx.fillRect(bx, by, wdt * f, 4);
+  });
+  if (secretary && !skipAnimal(secretary, false) && secretary.maxHp !== undefined && secretary.hp < secretary.maxHp && secretary.hp > 0) {
+    var ssc = secretary.sc || 1;
+    var sw = Math.max(18, 20 * ssc);
+    var sx = secretary.x - sw / 2, sy = secretary.y - (12 * ssc + 12);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(sx - 1, sy - 1, sw + 2, 6);
+    var sf = Math.max(0, secretary.hp / secretary.maxHp);
+    ctx.fillStyle = sf > 0.5 ? '#4caf50' : (sf > 0.25 ? '#ff9800' : '#f44336');
+    ctx.fillRect(sx, sy, sw * sf, 4);
+  }
+}
+// ---------- Player health: hurt when big animals bite, regen, respawn ----------
+var playerHp = 10, playerMaxHp = 10, playerInvT = 0, playerRegT = 0;
+function refreshHP() {
+  var f = document.getElementById('hpfill');
+  if (f) f.style.width = Math.max(0, playerHp / playerMaxHp * 100) + '%';
+}
+function damagePlayer(n) {
+  if (playerInvT > 0 || playerHp <= 0 || !playing) return;
+  playerHp -= n;
+  playerInvT = 1; playerRegT = 0;
+  refreshHP();
+  if (playerHp <= 0) {
+    playerHp = 0; refreshHP();
+    document.getElementById('deadScreen').style.display = 'flex';
+  }
+}
+function respawn() {
+  player.x = (spawnTile.x + 0.5) * TILE;
+  player.y = (spawnTile.y + 0.5) * TILE;
+  iceVx = 0; iceVy = 0;
+  playerHp = playerMaxHp; playerInvT = 0; playerRegT = 0;
+  eachLandAnimal(function (a) { a.aggroT = 0; });
+  if (secretary) secretary.aggroT = 0;
+  document.getElementById('deadScreen').style.display = 'none';
+  refreshHP();
 }
 // Safety net: if the player ever ends up inside something solid
 // (lag spike, edge case), push them back out to its surface.
@@ -4935,13 +5529,10 @@ function regrowTree(ti) {
   else if (was === 4) acacias[ti] = 1;
   else trees[ti] = 1;
 }
-// Whack the nearest woody trunk in reach that you're facing: +1 wood
-// every hit, and every hit counts toward the 20 that fell it.
-// Runs on every swing.
-function tryHarvestWood() {
-  var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+// Which way the player looks (pointer when known, else walk direction)
+function playerLook() {
   var ldx = player.fx, ldy = player.fy;
-  if (mouseSX >= 0) {
+  if (typeof mouseSX !== 'undefined' && mouseSX >= 0 && typeof cam !== 'undefined') {
     var mwx = cam.x + mouseSX / ZOOM, mwy = cam.y + mouseSY / ZOOM;
     var mdx = mwx - player.x, mdy = mwy - player.y;
     if (mdx * mdx + mdy * mdy > 4) {
@@ -4949,6 +5540,14 @@ function tryHarvestWood() {
       ldx = mdx / ml; ldy = mdy / ml;
     }
   }
+  return { x: ldx, y: ldy };
+}
+// Whack the nearest woody trunk in reach that you're facing: +1 wood
+// every hit, and every hit counts toward the 20 that fell it.
+// Runs on every swing.
+function tryHarvestWood() {
+  var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+  var lk0 = playerLook(), ldx = lk0.x, ldy = lk0.y;
   var best = -1, bd = 46 * 46;
   for (var ty = pty - 2; ty <= pty + 2; ty++) {
     for (var tx = ptx - 2; tx <= ptx + 2; tx++) {
@@ -4965,11 +5564,39 @@ function tryHarvestWood() {
     }
   }
   if (best === -1) return;
-  woodScore++;
-  refreshInv();
+  invAdd('wood', invSlots[HOT_OFF + hotSel].kind === 'axe' ? 2 : 1); // selected axe: lumberjack bonus
   if (++treeHits[best] >= TREE_HITS) fellTree(best);
 }
+// Swing a selected pickaxe at the nearest boulder in reach: +1 stone.
+// Boulders never break. Runs on every swing.
+function tryMineStone() {
+  if (invSlots[HOT_OFF + hotSel].kind !== 'pickaxe') return;
+  var ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+  var lk0 = playerLook(), ldx = lk0.x, ldy = lk0.y;
+  var best = -1, bd = 46 * 46;
+  for (var ty = pty - 2; ty <= pty + 2; ty++) {
+    for (var tx = ptx - 2; tx <= ptx + 2; tx++) {
+      if (!inBounds(tx, ty)) continue;
+      var ti = idx(tx, ty);
+      if (!boulder[ti]) continue;
+      var cx = tx * TILE + TILE / 2, cy = ty * TILE + TILE / 2;
+      var dx = cx - player.x, dy = cy - player.y;
+      var d2 = dx * dx + dy * dy;
+      if (d2 > bd) continue;
+      var d = Math.sqrt(d2) || 1;
+      if ((dx / d) * ldx + (dy / d) * ldy < 0.2) continue; // must face it a bit
+      bd = d2; best = ti;
+    }
+  }
+  if (best === -1) return;
+  invAdd('stone', 1);
+}
 function update(dt) {
+  if (invOpen) return; // backpack open: the world waits
+  if (speedBoostT > 0) speedBoostT -= dt; // sugar rush ticks down
+  if (playerInvT > 0) playerInvT -= dt; // hurt cooldown ticks down
+  playerRegT += dt; // slow heal after 6 calm seconds
+  if (playerRegT > 6 && playerHp < playerMaxHp && playerHp > 0) { playerHp++; playerRegT = 0; refreshHP(); }
   var dx = 0, dy = 0;
   if (keys['a'] || keys['arrowleft']) dx -= 1;
   if (keys['d'] || keys['arrowright']) dx += 1;
@@ -4986,7 +5613,7 @@ function update(dt) {
   if (onIce) {
     // Skating: momentum carries you, steering only nudges it. Full speed —
     // ice is the fast way across, water is the slow way.
-    var want = (keys['shift'] ? 340 : 220);
+    var want = (keys['shift'] ? 340 : 220) * (speedBoostT > 0 ? 1.25 : 1);
     var ik = Math.min(1, dt * 3.5);
     iceVx += (dx * want - iceVx) * ik;
     iceVy += (dy * want - iceVy) * ik;
@@ -5003,7 +5630,7 @@ function update(dt) {
     resolveTrunks();
   } else {
     iceVx = 0; iceVy = 0;
-    var speed = (keys['shift'] ? 340 : 220) * (inMud ? 0.25 : (inWater ? 0.5 : 1)) * dt;
+    var speed = (keys['shift'] ? 340 : 220) * (inMud ? 0.25 : (inWater ? 0.5 : 1)) * (speedBoostT > 0 ? 1.25 : 1) * dt;
     // sub-steps so fast sprints can never jump over thin barriers
     var steps = Math.max(1, Math.ceil(speed / 6));
     var sx = dx * speed / steps, sy = dy * speed / steps;
@@ -5073,9 +5700,8 @@ function update(dt) {
           berryN[ei]--;
           if (berryN[ei] < 3 && berryT[ei] > 20) berryT[ei] = 0;
           if (!berryN[ei]) berryT[ei] = 0;
-          score++;
+          invAdd('berry', 1);
           eatCd = 0.25;
-          refreshInv();
           break;
         }
       }
@@ -5094,9 +5720,8 @@ function update(dt) {
           if (mdx * mdx + mdy * mdy < (player.r + 10) * (player.r + 10)) {
             mushN[mi]--;
             if (!mushN[mi]) mushT[mi] = 0;
-            mushScore++;
+            invAdd('shroom', 1);
             eatCd = 0.25;
-            refreshInv();
             break;
           }
         }
@@ -5835,6 +6460,10 @@ function update(dt) {
   for (var wki = warthogs.length - 1; wki >= 0; wki--) {
     var wt = warthogs[wki];
     if (!wt) continue;
+    if (wt.aggroT > 0) { // you hit it: it charges you
+      aggroMove(wt, dt, 10 * (wt.sc || 1) + player.r, 2, 1.2, function () { hogStep(wt, 85, dt); });
+      continue;
+    }
     if (wt.muddyT > 0) wt.muddyT -= dt;
     // Hyenas nearby? Drop everything and run!
     if (wt.state !== 'flee') {
@@ -5980,6 +6609,10 @@ function update(dt) {
     if (hy.biteCd > 0) hy.biteCd -= dt;
     if (hy.prey && warthogs.indexOf(hy.prey) === -1) hy.prey = null;
     if (hy.meat && hogCarcasses.indexOf(hy.meat) === -1) hy.meat = null;
+    if (hy.aggroT > 0) { // you hit it: it bites back
+      aggroMove(hy, dt, 9 * (hy.sc || 1) + player.r, 2, 1.2, function () { hyenaStep(hy, 110, dt); });
+      continue;
+    }
     if (hy.state === 'wander') {
       hy.timer -= dt; hy.huntCd -= dt;
       // a packmate already picked one: join the same chase right away
@@ -6153,6 +6786,10 @@ function update(dt) {
   // They never breed or die — always exactly 5 of them.
   for (var gzi = 0; gzi < grizzlies.length; gzi++) {
     var gz = grizzlies[gzi];
+    if (gz.aggroT > 0) { // you hit it: it mauls you back
+      aggroMove(gz, dt, 13 * (gz.sc || 1) + player.r, 4, 1.5, function () { grizStep(gz, 95, dt); });
+      continue;
+    }
     if (gz.state === 'walk') {
       gz.timer -= dt; gz.huntCd -= dt;
       if (gz.timer <= 0) {
@@ -6344,6 +6981,10 @@ function update(dt) {
   for (var gai2 = 0; gai2 < gators.length; gai2++) {
     var ga = gators[gai2];
     ga.wig += dt * 6;
+    if (ga.aggroT > 0) { // you hit it: death roll incoming
+      aggroMove(ga, dt, 12 * (ga.sc || 1) + player.r, 3, 1.5, function () { gatorStep(ga, 70, dt); });
+      continue;
+    }
     if (ga.state === 'cruise') {
       ga.timer -= dt; ga.huntCd -= dt;
       if (ga.timer <= 0) {
@@ -6433,6 +7074,10 @@ function update(dt) {
   for (var tai = 0; tai < tarantulas.length; tai++) {
     var ta = tarantulas[tai];
     if (ta.state === 'caught') continue; // snatched by an eagle, dangling in its beak
+    if (ta.aggroT > 0) { // you hit it: it runs you down
+      aggroMove(ta, dt, 5 * (ta.sc || 1) + player.r, 1, 1.0, function () { lizStep(ta, 75, dt); });
+      continue;
+    }
     if (ta.state === 'hide') {
       // squeezed under the boulder, invisible
       ta.timer -= dt;
@@ -6694,6 +7339,15 @@ function update(dt) {
   for (var ski = 0; ski < snakes.length; ski++) {
     var sn = snakes[ski];
     sn.wig += dt * 9;
+    if (sn.aggroT > 0) { // you hit it: it strikes back
+      aggroMove(sn, dt, 4 * (sn.sc || 1) + player.r, 1, 1.0, function () {
+        var sx = sn.x + Math.cos(sn.heading) * 65 * dt;
+        if (!snakeBlocked(sx, sn.y)) sn.x = sx;
+        var sy = sn.y + Math.sin(sn.heading) * 65 * dt;
+        if (!snakeBlocked(sn.x, sy)) sn.y = sy;
+      });
+      continue;
+    }
     if (secretary && secretary.state === 'hunt' && secretary.prey === sn) {
       // fleeing the secretary bird! fastest slither straight away from it —
       // but the chase tires it, slowing it down until the faster bird
@@ -6810,7 +7464,9 @@ function update(dt) {
   // it down. There is only ever one of it.
   if (secretary) {
     var sb = secretary;
-    if (sb.state === 'walk') {
+    if (sb.aggroT > 0) { // you hit it: it stomps you
+      aggroMove(sb, dt, 8 * (sb.sc || 1) + player.r, 2, 1.2, function () { jackHop(sb, 115, dt); });
+    } else if (sb.state === 'walk') {
       sb.timer -= dt; sb.huntCd -= dt;
       if (sb.timer <= 0) {
         if (sb.resting) {
@@ -8501,7 +9157,7 @@ function resolveAnimalPairs() {
     if (swingFrame >= SWING_SEQ.length) { swingFrame = -1; swingT = 0; swingCd = 0.3; }
   } else { // idle: cool down, then re-swing while held
     swingCd -= dt;
-    if (mouseHeld && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); }
+    if (mouseHeld && swingCd <= 0) { swingFrame = 0; swingT = 0; tryHarvestWood(); tryMineStone(); tryHitAnimal(); }
   }
 }
 
@@ -12149,6 +12805,7 @@ function render(t, rdt) {
     }
   }
   if (!drewPlayer) drawPlayer(px, py, t);
+  drawHealthBars();
 
   // Tree canopies seen straight from above, always drawn above the player.
   // They fade when you slip underneath so you can still see yourself.
@@ -12378,6 +13035,7 @@ document.getElementById('playBtn').addEventListener('click', function () {
   menuEl.style.display = 'none';
   playing = true;
 });
+document.getElementById('respawnBtn').addEventListener('click', function () { respawn(); });
 // Hat picker on the start screen (remembered between visits)
 var selectedHat = 0;
 try {
